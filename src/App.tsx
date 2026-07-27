@@ -96,7 +96,8 @@ import {
   updateGoogleDocLive,
   fetchAgentCredentialsFromSheet
 } from './workspace';
-
+//Paste roster
+import { parsePastedRoster } from './pastedRoster';
 // Modular Sections
 import DashboardSection from './components/DashboardSection';
 import CrmSection from './components/CrmSection';

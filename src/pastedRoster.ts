@@ -1,4 +1,6 @@
-import { parsePastedRoster } from './utils/yourUtilityFile'; // সঠিক ফাইল পাথ দিন
+export function parsePastedRoster(...) {
+  // ...
+}
 // Raw pasted roster data from July 2026
 export const RAW_PASTED_ROSTER = `1-Jul-26  2-Jul-26  3-Jul-26  4-Jul-26  5-Jul-26  6-Jul-26  7-Jul-26  8-Jul-26  9-Jul-26  10-Jul-26 11-Jul-26 12-Jul-26 13-Jul-26 14-Jul-26 15-Jul-26 16-Jul-26 17-Jul-26 18-Jul-26 19-Jul-26 20-Jul-26 21-Jul-26 22-Jul-26 23-Jul-26 24-Jul-26 25-Jul-26 26-Jul-26
 Name  Agent Portal ID Wed Thu Fri Sat Sun Mon Tue Wed Thu Fri Sat Sun Mon Tue Wed Thu Fri Sat Sun Mon Tue Wed Thu Fri Sat Sun
