@@ -1,0 +1,211 @@
+{
+  "entities": {
+    "session": {
+      "title": "Live Agent Session",
+      "description": "Represents a real-time logged-in agent session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "loginTime": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["offline", "available", "on_break"] },
+        "currentActivity": { "type": "string" },
+        "lastActive": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "loginTime", "status", "currentActivity", "lastActive"]
+    },
+    "break": {
+      "title": "Live Break",
+      "description": "Represents a real-time shared break event",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "agentId": { "type": "string" },
+        "agentName": { "type": "string" },
+        "startTime": { "type": "string", "format": "date-time" },
+        "endTime": { "type": "string", "format": "date-time" },
+        "reason": { "type": "string" },
+        "duration": { "type": "integer" },
+        "status": { "type": "string", "enum": ["active", "completed"] }
+      },
+      "required": ["id", "agentId", "agentName", "startTime", "reason", "status"]
+    },
+    "activityLog": {
+      "title": "Activity Log Event",
+      "description": "Granular real-time state change log with second-precision timestamp",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "agentId": { "type": "string" },
+        "agentName": { "type": "string" },
+        "eventType": { "type": "string" },
+        "previousStatus": { "type": "string" },
+        "newStatus": { "type": "string" },
+        "previousActivity": { "type": "string" },
+        "newActivity": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "formattedTime": { "type": "string" }
+      },
+      "required": ["id", "agentId", "agentName", "eventType", "newStatus", "newActivity", "timestamp"]
+    },
+    "agentCredential": {
+      "title": "Agent Credential",
+      "description": "User credential containing agent ID, password, name, and role",
+      "type": "object",
+      "properties": {
+        "agentId": { "type": "string" },
+        "passwordHash": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["AGENT", "ADMIN"] }
+      },
+      "required": ["agentId", "passwordHash", "name", "role"]
+    },
+    "activeSessionPointer": {
+      "title": "Active Session Pointer",
+      "description": "Single active session pointer per agent ID and device type (web or mobile)",
+      "type": "object",
+      "properties": {
+        "agentId": { "type": "string" },
+        "deviceType": { "type": "string", "enum": ["web", "mobile"] },
+        "sessionId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "loginTime": { "type": "string", "format": "date-time" },
+        "userAgent": { "type": "string" }
+      },
+      "required": ["agentId", "deviceType", "sessionId", "timestamp"]
+    },
+    "dailyDurationRecord": {
+      "title": "Daily Duration Record",
+      "description": "Per-agent, per-calendar-date accumulated duration across logins and logouts",
+      "type": "object",
+      "properties": {
+        "agentId": { "type": "string" },
+        "date": { "type": "string" },
+        "totalSeconds": { "type": "integer" },
+        "sessionStartTimestamp": { "type": "integer" },
+        "lastUpdatedISO": { "type": "string", "format": "date-time" }
+      },
+      "required": ["agentId", "date", "totalSeconds"]
+    },
+    "crmContact": {
+      "title": "CRM Contact",
+      "description": "Customer/contact record in CRM",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "company": { "type": "string" },
+        "status": { "type": "string", "enum": ["Lead", "Active", "Inactive", "VIP"] },
+        "notes": { "type": "string" },
+        "lastContactDate": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "email", "company", "status"]
+    },
+    "supportTicket": {
+      "title": "Support Ticket",
+      "description": "Customer support ticket",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "contactId": { "type": "string" },
+        "contactName": { "type": "string" },
+        "title": { "type": "string" },
+        "priority": { "type": "string", "enum": ["Low", "Medium", "High", "Urgent"] },
+        "status": { "type": "string", "enum": ["Open", "In Progress", "Resolved", "Closed"] },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "contactId", "title", "priority", "status", "category", "description"]
+    },
+    "kbArticle": {
+      "title": "Knowledge Base Article",
+      "description": "Article in the knowledge base",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "category": { "type": "string" },
+        "content": { "type": "string" },
+        "author": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "category", "content", "author"]
+    },
+    "rosterAssignment": {
+      "title": "Roster Assignment Day",
+      "description": "Daily roster schedule and agent shift assignments",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "dayOfWeek": { "type": "string" },
+        "notes": { "type": "string" },
+        "isAutoGenerated": { "type": "boolean" }
+      },
+      "required": ["id", "date", "dayOfWeek"]
+    },
+    "deletedItem": {
+      "title": "Deleted Item Trash Record",
+      "description": "Soft-deleted item record saved for recovery/audit before 30-day purge",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "originalCollection": { "type": "string" },
+        "originalId": { "type": "string" },
+        "deletedAt": { "type": "string", "format": "date-time" },
+        "deletedBy": { "type": "string" }
+      },
+      "required": ["id", "originalCollection", "originalId", "deletedAt", "deletedBy"]
+    }
+  },
+  "firestore": {
+    "/agent_sessions/{sessionId}": {
+      "schema": "session",
+      "description": "Collection of currently active agent login sessions"
+    },
+    "/breaks/{breakId}": {
+      "schema": "break",
+      "description": "Collection of live and historical break activities"
+    },
+    "/activity_logs/{logId}": {
+      "schema": "activityLog",
+      "description": "Collection of full granularity real-time status change transition logs"
+    },
+    "/agent_credentials/{agentId}": {
+      "schema": "agentCredential",
+      "description": "Collection of user IDs, names, roles, and passwords stored securely in Firebase"
+    },
+    "/active_sessions/{docId}": {
+      "schema": "activeSessionPointer",
+      "description": "Pointers enforcing single active session per device type per agent"
+    },
+    "/daily_duration/{docId}": {
+      "schema": "dailyDurationRecord",
+      "description": "Accumulated daily login duration tracking per agent and date"
+    },
+    "/contacts/{contactId}": {
+      "schema": "crmContact",
+      "description": "CRM contacts collection"
+    },
+    "/support_tickets/{ticketId}": {
+      "schema": "supportTicket",
+      "description": "Support tickets collection"
+    },
+    "/kb_articles/{articleId}": {
+      "schema": "kbArticle",
+      "description": "Knowledge base articles collection"
+    },
+    "/roster_assignments/{rosterId}": {
+      "schema": "rosterAssignment",
+      "description": "Roster assignments collection"
+    },
+    "/deleted_items/{deletedId}": {
+      "schema": "deletedItem",
+      "description": "Soft-deleted items collection for recovery and purge tracking"
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "CRM Dashboard",
+  "description": "A customer support workspace featuring shifting clock, break time tracking, a comprehensive CRM system, and integration with Google Sheets and Google Docs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

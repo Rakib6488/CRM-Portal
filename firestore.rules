@@ -1,0 +1,149 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // catch-all rule: default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Common authentication helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAnonymous() {
+      return isSignedIn() && request.auth.token.firebase.sign_in_provider == 'anonymous';
+    }
+
+    function isNonAnonymous() {
+      return isSignedIn() && !isAnonymous();
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Session validation
+    function isValidSession(data) {
+      return data.keys().hasAll(['id', 'name', 'loginTime', 'status', 'currentActivity', 'lastActive'])
+        && data.keys().size() >= 6 && data.keys().size() <= 9
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() <= 100
+        && data.loginTime is string && data.loginTime.size() <= 50
+        && data.status is string && (data.status == 'offline' || data.status == 'available' || data.status == 'on_break')
+        && data.currentActivity is string && data.currentActivity.size() <= 100
+        && data.lastActive is string && data.lastActive.size() <= 50
+        && (!('shiftTimer' in data) || data.shiftTimer is int)
+        && (!('breakTimer' in data) || data.breakTimer is int)
+        && (!('agentId' in data) || (data.agentId is string && data.agentId.size() <= 128));
+    }
+
+    // Break validation
+    function isValidBreak(data) {
+      return data.keys().hasAll(['id', 'agentId', 'agentName', 'startTime', 'reason', 'status'])
+        && data.keys().size() >= 6 && data.keys().size() <= 8
+        && data.id is string && data.id.size() <= 128
+        && data.agentId is string && data.agentId.size() <= 128
+        && data.agentName is string && data.agentName.size() <= 100
+        && data.startTime is string && data.startTime.size() <= 50
+        && data.reason is string && data.reason.size() <= 200
+        && data.status is string && (data.status == 'active' || data.status == 'completed')
+        && (!('endTime' in data) || (data.endTime is string && data.endTime.size() <= 50))
+        && (!('duration' in data) || data.duration is int);
+    }
+
+    // Sessions rules: Signed-in users (including anonymous for presence) can manage their session
+    match /agent_sessions/{sessionId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() 
+        && isValidId(sessionId)
+        && isValidSession(incoming());
+      allow delete: if isSignedIn();
+    }
+
+    // Realtime sessions collection managed server-side
+    match /realtime_sessions/{sessionId} {
+      allow read: if isSignedIn();
+      allow write: if false; // Written only by backend server
+    }
+
+    // Breaks rules: Signed-in users can manage break entries
+    match /breaks/{breakId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && isValidId(breakId)
+        && isValidBreak(incoming());
+      allow delete: if isSignedIn();
+    }
+
+    // Config rules: Restricted to authenticated non-anonymous users
+    match /config/{configId} {
+      allow read, write: if isNonAnonymous();
+    }
+
+    // Activity Logs rules: Restricted to authenticated non-anonymous users
+    match /activity_logs/{logId} {
+      allow read, write: if isNonAnonymous();
+    }
+
+    // Audit Logs rules: Read-only for authenticated users, writes strictly handled by server
+    match /audit_logs/{auditId} {
+      allow read: if isNonAnonymous();
+      allow write: if false;
+    }
+
+    // Agent Performance Metrics rules: Restricted to authenticated non-anonymous users
+    match /agent_performance_metrics/{metricId} {
+      allow read, write: if isNonAnonymous();
+    }
+
+    // Active Sessions rules: Signed-in users can read/write session pointers
+    match /active_sessions/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Daily Duration rules: Signed-in users can read/write daily accumulated duration records
+    match /daily_duration/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Agent Credentials rules: STRICTLY BLOCKED for client-side Firebase SDK access.
+    // Client SDK cannot read or write credentials directly. Must go through server API.
+    match /agent_credentials/{agentId} {
+      allow read, write: if false;
+    }
+
+    // CRM Contacts collection: Signed-in users can read/write
+    match /contacts/{contactId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Support Tickets collection: Signed-in users can read/write
+    match /support_tickets/{ticketId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // KB Articles collection: Signed-in users can read/write
+    match /kb_articles/{articleId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Roster Assignments collection: Signed-in users can read/write
+    match /roster_assignments/{rosterId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Deleted Items trash collection: Signed-in users can read/write
+    match /deleted_items/{deletedId} {
+      allow read, write: if isSignedIn();
+    }
+  }
+}
