@@ -18,7 +18,7 @@ import {
   collection,
   getDocs
 } from "firebase/firestore";
-import { initializeApp as initAdminApp, getApps as getAdminApps } from "firebase-admin/app";
+import { initializeApp as initAdminApp, getApps as getAdminApps, cert } from "firebase-admin/app";
 import { getFirestore as getAdminFirestore } from "firebase-admin/firestore";
 
 dotenv.config();
@@ -37,7 +37,7 @@ let clientDb: any = null;
 
 try {
   const firebaseConfigPath = path.join(process.cwd(), 'firebase-applet-config.json');
-  let projectId: string | undefined = process.env.GCP_PROJECT || process.env.FIREBASE_PROJECT_ID;
+  let projectId: string | undefined = process.env.FIREBASE_ADMIN_PROJECT_ID || process.env.GCP_PROJECT || process.env.FIREBASE_PROJECT_ID;
 
   if (fs.existsSync(firebaseConfigPath)) {
     const configData = JSON.parse(fs.readFileSync(firebaseConfigPath, 'utf8'));
@@ -50,9 +50,28 @@ try {
 
   // Initialize Firebase Admin SDK
   if (!getAdminApps().length) {
-    initAdminApp({
-      projectId: projectId || 'demo-project'
-    });
+    const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
+    // Properly format escaped newlines in private key for cloud environments like Render
+    const privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY
+      ? process.env.FIREBASE_ADMIN_PRIVATE_KEY.replace(/\\n/g, '\n')
+      : undefined;
+
+    if (clientEmail && privateKey) {
+      initAdminApp({
+        credential: cert({
+          projectId: projectId || 'crm-portal-3aa6b',
+          clientEmail,
+          privateKey,
+        }),
+        databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL || "https://crm-portal-3aa6b-default-rtdb.firebaseio.com"
+      });
+      console.log('[Server] Firebase Admin SDK authenticated via Service Account credentials.');
+    } else {
+      initAdminApp({
+        projectId: projectId || 'crm-portal-3aa6b'
+      });
+      console.warn('[Server] Firebase Admin SDK initialized without service account keys. Backend operations may fall back to in-memory mode.');
+    }
   }
   adminDb = getAdminFirestore();
   console.log('[Server] Firebase Admin SDK successfully initialized.');
