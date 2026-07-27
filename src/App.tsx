@@ -1,3 +1,6 @@
+
+
+import { INITIAL_CONTACTS, INITIAL_TICKETS, INITIAL_KB_ARTICLES } from './data';
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import {
@@ -85,9 +88,24 @@ import {
   updateGoogleDocLive,
   fetchAgentCredentialsFromSheet
 } from './workspace';
-import { CRMContact, SupportTicket, RosterDay, AgentCredential, LiveAgentSession, KBArticle } from './types';
-import { INITIAL_CONTACTS, INITIAL_TICKETS, INITIAL_KB_ARTICLES } from './data';
-import { parsePastedRoster } from './pastedRoster';
+import {
+  updateRosterInSheet,
+  fetchRosterFromSheet,
+  appendRowToSheet,
+  syncSpecificDayToSheet,
+  updateGoogleDocLive,
+  fetchAgentCredentialsFromSheet
+} from './workspace';
+
+// Modular Sections
+import DashboardSection from './components/DashboardSection';
+import CrmSection from './components/CrmSection';
+import KbSection from './components/KbSection';
+
+// Empty Preset Arrays for Clean Setup
+const INITIAL_CONTACTS: any[] = [];
+const INITIAL_TICKETS: any[] = [];
+const INITIAL_KB_ARTICLES: any[] = [];
 
 // Modular Sections
 import DashboardSection from './components/DashboardSection';

@@ -15,6 +15,9 @@ export interface Agent {
   role: 'ADMIN' | 'AGENT';
 }
 
-// Demo preset Arrays (Empty array, dynamic database store default)
-export const initialContacts: Contact[] = [];
-export const defaultAgents: Agent[] = [];
+import { CRMContact, SupportTicket, KBArticle } from './types';
+
+// Preset data fully removed - Keeping empty arrays for dynamic database setup
+export const INITIAL_CONTACTS: CRMContact[] = [];
+export const INITIAL_TICKETS: SupportTicket[] = [];
+export const INITIAL_KB_ARTICLES: KBArticle[] = [];
