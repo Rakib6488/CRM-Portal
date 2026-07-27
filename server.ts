@@ -337,178 +337,20 @@ interface ServerAgentCredential {
   updatedAtISO?: string;
 }
 
-// Seeding agent credentials into Firestore on server startup (Item 1)
+// Seeding agent credentials into Firestore disabled
 async function seedCredentialsIfEmpty() {
-  try {
-    const existing = await dbGetCollectionDocs('agent_credentials');
-    if (existing && existing.length > 0) {
-      console.log(`[Credentials] agent_credentials collection populated (${existing.length} accounts).`);
-      return;
-    }
-
-    if (inMemoryCredentialsMap.size === 0) {
-      populateDefaultInMemoryCredentials();
-    }
-
-    console.log('[Credentials] Syncing default accounts...');
-    const seed = Array.from(inMemoryCredentialsMap.values());
-    await Promise.allSettled(seed.map(cred => dbSetDoc('agent_credentials', cred.agentId.toLowerCase(), cred)));
-    console.log('[Credentials] Default accounts ready.');
-  } catch (err) {
-    console.warn('[Credentials] Error during credentials seeding:', err);
-  }
+  // Demo auto-seeding disabled to keep database empty
+  console.log('[Credentials] Automatic credentials seeding is disabled. Database remains clean.');
+  return;
 }
 
 // -----------------------------------------------------------------------------
 // PORTAL DATA SEEDING & SOFT-DELETE CLEANUP
 // -----------------------------------------------------------------------------
 async function seedPortalDataIfEmpty() {
-  try {
-    // 1. CRM Contacts
-    const existingContacts = await dbGetCollectionDocs('contacts');
-    if (!existingContacts || existingContacts.length === 0) {
-      console.log('[Seed] Seeding initial CRM contacts into Firestore...');
-      const initialContacts = [
-        {
-          id: 'c-1',
-          name: 'Alice Johnson',
-          email: 'alice.johnson@acme.corp',
-          phone: '+1 (555) 123-4567',
-          company: 'Acme Corp',
-          status: 'VIP',
-          notes: 'Primary liaison for Acme enterprise license. Demands rapid support on database and sync features.',
-          lastContactDate: new Date().toISOString(),
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: 'c-2',
-          name: 'David Smith',
-          email: 'dsmith@quantumtech.io',
-          phone: '+1 (555) 987-6543',
-          company: 'Quantum Tech',
-          status: 'Active',
-          notes: 'Interested in upgrading to enterprise tier. Evaluated feature requests for multi-agent support.',
-          lastContactDate: new Date().toISOString(),
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: 'c-3',
-          name: 'Elena Rostova',
-          email: 'elena.r@novasolution.eu',
-          phone: '+33 1 42 68 53 00',
-          company: 'Nova Solutions',
-          status: 'Lead',
-          notes: 'Incoming prospect. Reached out regarding billing flexibility and global region support.',
-          lastContactDate: new Date().toISOString(),
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: 'c-4',
-          name: 'Marcus Brody',
-          email: 'm.brody@museumcorp.org',
-          phone: '+1 (555) 303-4040',
-          company: 'Museum Corp',
-          status: 'Inactive',
-          notes: 'Legacy account. Need to follow up about subscription renewal or standard tier downgrade.',
-          lastContactDate: new Date().toISOString(),
-          createdAt: new Date().toISOString()
-        }
-      ];
-      for (const c of initialContacts) {
-        await dbSetDoc('contacts', c.id, c);
-      }
-    }
-
-    // 2. Support Tickets
-    const existingTickets = await dbGetCollectionDocs('support_tickets');
-    if (!existingTickets || existingTickets.length === 0) {
-      console.log('[Seed] Seeding initial Support Tickets into Firestore...');
-      const initialTickets = [
-        {
-          id: 't-1',
-          contactId: 'c-1',
-          contactName: 'Alice Johnson',
-          title: 'Enterprise Sync failure under high traffic',
-          priority: 'Urgent',
-          status: 'In Progress',
-          category: 'Technical',
-          description: 'During peak hourly sync operations, the server returns 504 gateway timeouts. We need a detailed explanation of rate limiting caps or custom database indexing remedies.',
-          createdAt: new Date().toISOString(),
-          replies: []
-        },
-        {
-          id: 't-2',
-          contactId: 'c-2',
-          contactName: 'David Smith',
-          title: 'Discrepancy in invoice for June 2026',
-          priority: 'Medium',
-          status: 'Open',
-          category: 'Billing',
-          description: 'Our enterprise bill shows 15 active seats, but we deprovisioned 3 seats on June 1st. Please adjust the total and issue a credit note.',
-          createdAt: new Date().toISOString(),
-          replies: []
-        },
-        {
-          id: 't-3',
-          contactId: 'c-3',
-          contactName: 'Elena Rostova',
-          title: 'Clarification regarding GDPR data retention policy',
-          priority: 'Low',
-          status: 'Open',
-          category: 'General',
-          description: 'We require a formal GDPR compliance statement showing physical hosting location of European user databases and standard retention period.',
-          createdAt: new Date().toISOString(),
-          replies: []
-        },
-        {
-          id: 't-4',
-          contactId: 'c-1',
-          contactName: 'Alice Johnson',
-          title: 'API endpoint for custom webhooks fails',
-          priority: 'High',
-          status: 'Resolved',
-          category: 'Technical',
-          description: 'POST payload from our app fails with invalid content-type. Turns out the parser expects strict JSON headers. Resolved by adjusting requests.',
-          createdAt: new Date().toISOString(),
-          replies: []
-        }
-      ];
-      for (const t of initialTickets) {
-        await dbSetDoc('support_tickets', t.id, t);
-      }
-    }
-
-    // 3. Knowledge Base Articles
-    const existingKb = await dbGetCollectionDocs('kb_articles');
-    if (!existingKb || existingKb.length === 0) {
-      console.log('[Seed] Seeding initial Knowledge Base Articles into Firestore...');
-      const initialKbArticles = [
-        {
-          id: 'kb-palmpay-about',
-          title: 'About PalmPay Platform & Customer Service Ecosystem',
-          category: 'Policy',
-          content: 'PalmPay is a leading, fully-licensed African fintech platform launched in 2019, regulated by the Central Bank of Nigeria (CBN) and insured by the NDIC. Operating with state-of-the-art secure infrastructure, it serves over 30 million regular app users and a network of 500,000+ mobile banking agents.\n\n### Core User Roles\n1. **Regular App Users**: Conduct transfers, bill payments, airtime recharges, and savings on the PalmPay Consumer App.\n2. **Mobile Money Agents (POS Users)**: Provide cash-in (deposit) and cash-out (withdrawal) agency services using PalmPay POS Terminals.\n3. **Pay with PalmPay Merchants**: Store owners accepting business-to-business payments.\n\n### Official Account KYC Tiers & Limits\n* **Tier 1 (Basic)**: Max Single Deposit: NGN 50,000 | Daily Limit: NGN 50,000 | Max Balance: NGN 300,000. Needs registered phone number and legal name.\n* **Tier 2 (Medium)**: Max Single Deposit: NGN 100,000 | Daily Limit: NGN 200,000 | Max Balance: NGN 500,000. Requires linked Bank Verification Number (BVN) and matching identity.\n* **Tier 3 (Unlimited)**: Max Single Deposit: NGN 1,000,000 | Daily Limit: NGN 5,000,000 | Max Balance: Unlimited. Requires full physical address verification, BVN, utility bill, and Govt ID upload.',
-          author: 'PalmPay FCS Admin',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        },
-        {
-          id: 'kb-palmpay-transfers',
-          title: 'Transfer Troubleshooting SOP (Failed, Pending, and Double Debits)',
-          category: 'Unable to pay',
-          content: 'Funds transfer resolution is the highest-volume support request. Agents must follow this exact diagnostic workflow:\n\n### 1. Pending Transfers (In-Flight)\n* **Rule**: Transfers stuck as "Pending" or "Processing" are usually undergoing interbank clearing (NIBSS network congestion).\n* **Action**: Advise the customer to wait **24 hours** for automatic bank reconciliation.\n* **Ticket Logging**: Do not escalate unless 24 hours have elapsed. If still pending, retrieve the **Session ID (30 digits)**, Transaction Reference, Sender/Receiver Account Numbers, and exact Bank Names.\n\n### 2. Failed Transfers but Account Debited\n* **Rule**: Transaction state is marked "Failed" in the app, but user balance was deducted.\n* **Action**: Explain that the funds are held in the clearing partner\'s suspense pool. These are automatically reversed to the sender\'s PalmPay wallet within **24 to 48 working hours** (excluding weekends).\n* **Audit**: Check the internal Ledger Tool using the transaction ID to verify if an automatic reversal has already been triggered.\n\n### 3. Double Debits (Network Glitches)\n* **Rule**: Customer is charged twice for a single transfer or POS withdrawal.\n* **Action**: Request the customer\'s official bank statement showing both debit timestamps. Log an FCS ticket with both transaction reference hashes. Reversals are processed within 3-5 business days upon validation.',
-          author: 'Operations Escalation Lead',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        }
-      ];
-      for (const k of initialKbArticles) {
-        await dbSetDoc('kb_articles', k.id, k);
-      }
-    }
-  } catch (err) {
-    console.warn('[Seed] Error seeding portal data:', err);
-  }
+  // Demo Data Seeding সম্পূর্ণ নিষ্ক্রিয় করা হয়েছে যাতে ডাটাবেজে কোনো Preset Data না থাকে।
+  console.log('[Seed] Automatic portal data seeding is disabled. Database remains empty.');
+  return;
 }
 
 async function purgeOldDeletedItems() {
@@ -565,7 +407,6 @@ function jsonToCsv(dataArray: any[]): string {
 
   return csvRows.join('\r\n');
 }
-
 // -----------------------------------------------------------------------------
 // JWT SESSION MANAGEMENT WITH TOKEN VERSION CHECK (Item 6)
 // -----------------------------------------------------------------------------
