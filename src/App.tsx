@@ -88,26 +88,8 @@ import {
   updateGoogleDocLive,
   fetchAgentCredentialsFromSheet
 } from './workspace';
-import {
-  updateRosterInSheet,
-  fetchRosterFromSheet,
-  appendRowToSheet,
-  syncSpecificDayToSheet,
-  updateGoogleDocLive,
-  fetchAgentCredentialsFromSheet
-} from './workspace';
 //Paste roster
 import { parsePastedRoster } from './pastedRoster';
-// Modular Sections
-import DashboardSection from './components/DashboardSection';
-import CrmSection from './components/CrmSection';
-import KbSection from './components/KbSection';
-
-// Empty Preset Arrays for Clean Setup
-const INITIAL_CONTACTS: any[] = [];
-const INITIAL_TICKETS: any[] = [];
-const INITIAL_KB_ARTICLES: any[] = [];
-
 // Modular Sections
 import DashboardSection from './components/DashboardSection';
 import CrmSection from './components/CrmSection';
