@@ -64,6 +64,32 @@ export interface KBArticle {
 
 export type AgentStatus = 'offline' | 'available' | 'on_break';
 
+export type CallDirection = 'inbound' | 'outbound';
+export type CallOutcome = 'connected' | 'missed' | 'voicemail' | 'no_agents_available' | 'in_progress';
+
+export interface CallLogEntry {
+  id: string;
+  callSid: string;
+  fromNumber: string;
+  toNumber: string;
+  direction: CallDirection;
+  digitPressed?: string;
+  department?: string;
+  routedAgentId?: string;
+  routedAgentName?: string;
+  outcome: CallOutcome;
+  durationSeconds?: number;
+  recordingUrl?: string;
+  startedAtISO: string;
+  endedAtISO?: string;
+}
+
+export interface IvrMenuOption {
+  digit: string;
+  label: string;
+  department: string;
+}
+
 export interface MonthlyShifts {
   morning: string[];
   standardDay: string[];

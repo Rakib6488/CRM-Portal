@@ -7,6 +7,7 @@ import { z } from "zod";
 import rateLimit from "express-rate-limit";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+import twilio from "twilio";
 import dotenv from "dotenv";
 import { initializeApp as initClientApp } from "firebase/app";
 import {
@@ -694,6 +695,8 @@ async function startServer() {
   }));
 
   app.use(express.json());
+  // Twilio webhooks (voice, gather, status callback) POST as application/x-www-form-urlencoded
+  app.use(express.urlencoded({ extended: false }));
 
   // Trigger background seed credentials, portal data, and realtime state load without blocking server listen
   seedCredentialsIfEmpty().catch(err => console.warn("[Credentials] Background seed warning:", err));
@@ -1516,6 +1519,213 @@ async function startServer() {
    * 4. Restore from Backup:
    *    gcloud firestore import gs://[YOUR_BACKUP_BUCKET_NAME]/[EXPORT_FOLDER]
    */
+
+  // =========================================================================
+  // IVR / CALL PORTAL (TWILIO) — TEST MODE
+  // =========================================================================
+  // NOTE: This whole section is built for a Twilio TRIAL/test account.
+  // In trial mode Twilio will only actually connect calls to/from phone
+  // numbers you have verified in the Twilio Console, and every call plays a
+  // short "trial account" disclaimer before your TwiML runs. None of that
+  // needs any code change — it goes away automatically once the account is
+  // upgraded (paid).
+
+  const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || "";
+  const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "";
+  const TWILIO_API_KEY_SID = process.env.TWILIO_API_KEY_SID || "";
+  const TWILIO_API_KEY_SECRET = process.env.TWILIO_API_KEY_SECRET || "";
+  const TWILIO_TWIML_APP_SID = process.env.TWILIO_TWIML_APP_SID || "";
+  const TWILIO_CALLER_ID = process.env.TWILIO_CALLER_ID || "";
+  const twilioConfigured = !!(TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_API_KEY_SID && TWILIO_API_KEY_SECRET && TWILIO_TWIML_APP_SID);
+
+  if (!twilioConfigured) {
+    console.warn("[IVR] Twilio environment variables are not fully set. IVR/call endpoints will respond with a clear 'not configured' error until they are.");
+  }
+
+  // Simple IVR menu — digit pressed -> department. Edit this to change the menu.
+  const IVR_MENU: { digit: string; label: string; department: string }[] = [
+    { digit: "1", label: "General Support", department: "General" },
+    { digit: "2", label: "Billing", department: "Billing" },
+    { digit: "3", label: "Technical Issue", department: "Technical" },
+  ];
+
+  // Round-robin pointer so repeated calls don't always hit the same agent
+  let lastRoutedAgentIndex = 0;
+
+  function getAvailableAgents(): RealtimeSession[] {
+    return Array.from(activeSessionsMap.values()).filter(s => s.status === "available");
+  }
+
+  function pickNextAvailableAgent(): RealtimeSession | null {
+    const available = getAvailableAgents();
+    if (available.length === 0) return null;
+    lastRoutedAgentIndex = (lastRoutedAgentIndex + 1) % available.length;
+    return available[lastRoutedAgentIndex];
+  }
+
+  async function logCall(entry: any) {
+    await dbSetDoc("ivr_calls", entry.callSid || `call_${Date.now()}`, entry);
+    broadcastRealtimeEvent("ACTIVITY_LOG_ADDED" as any, { ivrCall: entry });
+  }
+
+  // POST /api/ivr/token — mints a short-lived Twilio Access Token so the agent's
+  // browser (Twilio Voice JS SDK) can register as a "Client" and receive calls.
+  app.post("/api/ivr/token", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.replace("Bearer ", "") || req.body?.token || "";
+    const session = await verifyActiveSessionInFirestore(token);
+
+    if (!session.valid || !session.user) {
+      return res.status(401).json({ error: "Unauthorized: valid session required." });
+    }
+
+    if (!twilioConfigured) {
+      return res.status(503).json({ error: "IVR is not configured yet. Ask an admin to set the TWILIO_* environment variables (see .env.example)." });
+    }
+
+    const AccessToken = twilio.jwt.AccessToken;
+    const VoiceGrant = AccessToken.VoiceGrant;
+
+    const identity = session.user.id.toLowerCase();
+    const accessToken = new AccessToken(TWILIO_ACCOUNT_SID, TWILIO_API_KEY_SID, TWILIO_API_KEY_SECRET, {
+      identity,
+      ttl: 3600,
+    });
+    const voiceGrant = new VoiceGrant({
+      outgoingApplicationSid: TWILIO_TWIML_APP_SID,
+      incomingAllow: true,
+    });
+    accessToken.addGrant(voiceGrant);
+
+    res.json({ token: accessToken.toJwt(), identity });
+  });
+
+  // POST /api/ivr/voice — Twilio hits this the moment a real call comes into
+  // your Twilio number. Set this exact URL as the number's "A call comes in"
+  // webhook (or as the TwiML App's Request URL): {APP_URL}/api/ivr/voice
+  app.post("/api/ivr/voice", async (req, res) => {
+    const VoiceResponse = twilio.twiml.VoiceResponse;
+    const twiml = new VoiceResponse();
+
+    const gather = twiml.gather({
+      numDigits: 1,
+      timeout: 8,
+      action: "/api/ivr/route",
+      method: "POST",
+    });
+    gather.say(
+      "Thank you for calling. " +
+      IVR_MENU.map(o => `Press ${o.digit} for ${o.label}.`).join(" ")
+    );
+
+    // If caller doesn't press anything, loop the menu once more then fall back to routing as general.
+    twiml.redirect("/api/ivr/voice");
+
+    res.type("text/xml").send(twiml.toString());
+  });
+
+  // POST /api/ivr/route — called by Twilio with the digit the caller pressed.
+  // Finds an available agent and bridges the call to their browser widget
+  // (Twilio Client), or falls back gracefully if nobody is available.
+  app.post("/api/ivr/route", async (req, res) => {
+    const VoiceResponse = twilio.twiml.VoiceResponse;
+    const twiml = new VoiceResponse();
+
+    const digit = (req.body?.Digits as string) || "";
+    const callSid = (req.body?.CallSid as string) || "";
+    const fromNumber = (req.body?.From as string) || "unknown";
+    const toNumber = (req.body?.To as string) || TWILIO_CALLER_ID;
+    const menuOption = IVR_MENU.find(o => o.digit === digit);
+    const department = menuOption?.department || "General";
+
+    const agent = pickNextAvailableAgent();
+
+    if (!agent) {
+      twiml.say("Sorry, all our agents are currently busy. Please leave a message after the tone, and we will get back to you.");
+      twiml.record({ maxLength: 90, action: "/api/ivr/status-callback", playBeep: true });
+      await logCall({
+        callSid,
+        fromNumber,
+        toNumber,
+        direction: "inbound",
+        digitPressed: digit,
+        department,
+        outcome: "no_agents_available",
+        startedAtISO: new Date().toISOString(),
+      });
+      res.type("text/xml").send(twiml.toString());
+      return;
+    }
+
+    const dial = twiml.dial({
+      timeout: 20,
+      action: "/api/ivr/status-callback",
+      method: "POST",
+    });
+    dial.client(agent.agentId);
+
+    await logCall({
+      callSid,
+      fromNumber,
+      toNumber,
+      direction: "inbound",
+      digitPressed: digit,
+      department,
+      routedAgentId: agent.agentId,
+      routedAgentName: agent.name,
+      outcome: "in_progress",
+      startedAtISO: new Date().toISOString(),
+    });
+
+    res.type("text/xml").send(twiml.toString());
+  });
+
+  // POST /api/ivr/status-callback — Twilio posts the final call/dial/recording
+  // status here. We use it to close out the call log entry.
+  app.post("/api/ivr/status-callback", async (req, res) => {
+    const VoiceResponse = twilio.twiml.VoiceResponse;
+    const twiml = new VoiceResponse();
+
+    const callSid = (req.body?.CallSid as string) || "";
+    const dialCallStatus = (req.body?.DialCallStatus as string) || "";
+    const recordingUrl = (req.body?.RecordingUrl as string) || undefined;
+    const callDuration = req.body?.DialCallDuration || req.body?.RecordingDuration;
+
+    if (callSid) {
+      const existing = await dbGetDoc("ivr_calls", callSid);
+      if (existing) {
+        existing.outcome = recordingUrl ? "voicemail" : (dialCallStatus === "completed" ? "connected" : "missed");
+        existing.durationSeconds = callDuration ? Number(callDuration) : existing.durationSeconds;
+        existing.recordingUrl = recordingUrl || existing.recordingUrl;
+        existing.endedAtISO = new Date().toISOString();
+        await dbSetDoc("ivr_calls", callSid, existing);
+        broadcastRealtimeEvent("ACTIVITY_LOG_ADDED" as any, { ivrCall: existing });
+      }
+    }
+
+    if (dialCallStatus && dialCallStatus !== "completed" && !recordingUrl) {
+      twiml.say("The agent could not be reached. Please try again later. Goodbye.");
+    }
+    res.type("text/xml").send(twiml.toString());
+  });
+
+  // GET /api/ivr/calls — authenticated call-log fetch for the portal UI (Reports / Dashboard).
+  app.get("/api/ivr/calls", async (req, res) => {
+    const token = (req.query.token as string) || req.headers.authorization?.replace("Bearer ", "") || "";
+    const session = await verifyActiveSessionInFirestore(token);
+    if (!session.valid) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const calls = await dbGetCollectionDocs("ivr_calls");
+    calls.sort((a: any, b: any) => new Date(b.startedAtISO || 0).getTime() - new Date(a.startedAtISO || 0).getTime());
+    res.json({ calls: calls.slice(0, 200) });
+  });
+
+  // GET /api/ivr/config — lets the frontend know whether Twilio is configured yet,
+  // and hands over the (non-secret) IVR menu so the widget/UI can render it.
+  app.get("/api/ivr/config", async (_req, res) => {
+    res.json({ configured: twilioConfigured, menu: IVR_MENU, callerId: twilioConfigured ? TWILIO_CALLER_ID : null });
+  });
 
   // =========================================================================
   // VITE DEV / PRODUCTION MIDDLEWARE

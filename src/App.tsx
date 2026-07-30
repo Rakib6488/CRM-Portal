@@ -103,6 +103,7 @@ import AuthGatewayModal from './components/AuthGatewayModal';
 import GlobalSearchModal from './components/GlobalSearchModal';
 import SystemTroubleshooting from './components/SystemTroubleshooting';
 import ConfirmationModal from './components/ConfirmationModal';
+import CallWidget from './components/CallWidget';
 
 export const AGENTS_LIST = [
   { name: "Israt Jahan Mim", isMale: false },
@@ -3125,6 +3126,14 @@ export default function App() {
         onConfirm={executeHeaderCheckOut}
         onCancel={() => setShowHeaderClockOffConfirm(false)}
       />
+
+      {isPortalLoggedIn && currentUser && (
+        <CallWidget
+          agentId={currentUser.id}
+          agentName={currentUser.name}
+          isActive={isPortalLoggedIn}
+        />
+      )}
 
     </div>
   );
