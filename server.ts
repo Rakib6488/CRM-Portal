@@ -8,6 +8,7 @@ import rateLimit from "express-rate-limit";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import twilio from "twilio";
+import { MongoClient, Db } from "mongodb";
 import dotenv from "dotenv";
 import { initializeApp as initClientApp } from "firebase/app";
 import {
@@ -1448,7 +1449,7 @@ async function startServer() {
     const collectionName = (req.query.collection as string) || 'contacts';
     const allowedCollections = [
       'contacts', 'support_tickets', 'kb_articles', 'roster_assignments',
-      'deleted_items', 'realtime_sessions', 'activity_logs', 'audit_logs'
+      'deleted_items', 'realtime_sessions', 'activity_logs', 'audit_logs', 'ivr_calls'
     ];
 
     if (!allowedCollections.includes(collectionName)) {
@@ -1468,7 +1469,10 @@ async function startServer() {
     }
 
     try {
-      const docs = await dbGetCollectionDocs(collectionName);
+      // ivr_calls lives in MongoDB Atlas, not Firestore — everything else stays on Firestore.
+      const docs = collectionName === 'ivr_calls'
+        ? await mongoGetAllCalls()
+        : await dbGetCollectionDocs(collectionName);
       const csvData = jsonToCsv(docs);
 
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -1520,6 +1524,78 @@ async function startServer() {
    *    gcloud firestore import gs://[YOUR_BACKUP_BUCKET_NAME]/[EXPORT_FOLDER]
    */
 
+  // -----------------------------------------------------------------------------
+  // MONGODB ATLAS — IVR CALL LOGS STORAGE
+  // -----------------------------------------------------------------------------
+  // Call logs live in MongoDB Atlas instead of Firestore. Everything else in this
+  // app (auth, tickets, CRM, roster, etc.) stays on Firestore as before.
+  const MONGODB_URI = process.env.MONGODB_URI || "";
+  const MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || "customer_support_portal";
+  let mongoClient: MongoClient | null = null;
+  let mongoDb: Db | null = null;
+  const inMemoryCallLogs: any[] = []; // fallback if Atlas is unreachable
+
+  async function connectMongo() {
+    if (!MONGODB_URI) {
+      console.warn("[MongoDB] MONGODB_URI not set. IVR call logs will use an in-memory fallback only (lost on restart).");
+      return;
+    }
+    try {
+      mongoClient = new MongoClient(MONGODB_URI);
+      await mongoClient.connect();
+      mongoDb = mongoClient.db(MONGODB_DB_NAME);
+      await mongoDb.collection("ivr_calls").createIndex({ callSid: 1 }, { unique: true });
+      console.log(`[MongoDB] Connected to Atlas database "${MONGODB_DB_NAME}". IVR call logs will persist there.`);
+    } catch (err: any) {
+      console.warn("[MongoDB] Connection failed — falling back to in-memory call logs:", err?.message || err);
+      mongoDb = null;
+    }
+  }
+
+  async function mongoUpsertCall(entry: any) {
+    if (mongoDb) {
+      try {
+        await mongoDb.collection("ivr_calls").updateOne(
+          { callSid: entry.callSid },
+          { $set: entry },
+          { upsert: true }
+        );
+        return;
+      } catch (err) {
+        console.warn("[MongoDB] upsert failed for call log, using in-memory fallback:", err);
+      }
+    }
+    const idx = inMemoryCallLogs.findIndex(c => c.callSid === entry.callSid);
+    if (idx >= 0) inMemoryCallLogs[idx] = { ...inMemoryCallLogs[idx], ...entry };
+    else inMemoryCallLogs.unshift(entry);
+  }
+
+  async function mongoGetCall(callSid: string): Promise<any | null> {
+    if (mongoDb) {
+      try {
+        return await mongoDb.collection("ivr_calls").findOne({ callSid });
+      } catch (err) {
+        console.warn("[MongoDB] findOne failed for call log:", err);
+      }
+    }
+    return inMemoryCallLogs.find(c => c.callSid === callSid) || null;
+  }
+
+  async function mongoGetAllCalls(): Promise<any[]> {
+    if (mongoDb) {
+      try {
+        return await mongoDb.collection("ivr_calls").find().sort({ startedAtISO: -1 }).limit(200).toArray();
+      } catch (err) {
+        console.warn("[MongoDB] find failed for call logs:", err);
+      }
+    }
+    return [...inMemoryCallLogs]
+      .sort((a, b) => new Date(b.startedAtISO || 0).getTime() - new Date(a.startedAtISO || 0).getTime())
+      .slice(0, 200);
+  }
+
+  connectMongo().catch(err => console.warn("[MongoDB] Background connect warning:", err));
+
   // =========================================================================
   // IVR / CALL PORTAL (TWILIO) — TEST MODE
   // =========================================================================
@@ -1537,6 +1613,7 @@ async function startServer() {
   const TWILIO_TWIML_APP_SID = process.env.TWILIO_TWIML_APP_SID || "";
   const TWILIO_CALLER_ID = process.env.TWILIO_CALLER_ID || "";
   const twilioConfigured = !!(TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_API_KEY_SID && TWILIO_API_KEY_SECRET && TWILIO_TWIML_APP_SID);
+  const twilioRestClient = twilioConfigured ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) : null;
 
   if (!twilioConfigured) {
     console.warn("[IVR] Twilio environment variables are not fully set. IVR/call endpoints will respond with a clear 'not configured' error until they are.");
@@ -1564,7 +1641,7 @@ async function startServer() {
   }
 
   async function logCall(entry: any) {
-    await dbSetDoc("ivr_calls", entry.callSid || `call_${Date.now()}`, entry);
+    await mongoUpsertCall(entry);
     broadcastRealtimeEvent("ACTIVITY_LOG_ADDED" as any, { ivrCall: entry });
   }
 
@@ -1692,13 +1769,13 @@ async function startServer() {
     const callDuration = req.body?.DialCallDuration || req.body?.RecordingDuration;
 
     if (callSid) {
-      const existing = await dbGetDoc("ivr_calls", callSid);
+      const existing = await mongoGetCall(callSid);
       if (existing) {
         existing.outcome = recordingUrl ? "voicemail" : (dialCallStatus === "completed" ? "connected" : "missed");
         existing.durationSeconds = callDuration ? Number(callDuration) : existing.durationSeconds;
         existing.recordingUrl = recordingUrl || existing.recordingUrl;
         existing.endedAtISO = new Date().toISOString();
-        await dbSetDoc("ivr_calls", callSid, existing);
+        await mongoUpsertCall(existing);
         broadcastRealtimeEvent("ACTIVITY_LOG_ADDED" as any, { ivrCall: existing });
       }
     }
@@ -1716,15 +1793,104 @@ async function startServer() {
     if (!session.valid) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-    const calls = await dbGetCollectionDocs("ivr_calls");
-    calls.sort((a: any, b: any) => new Date(b.startedAtISO || 0).getTime() - new Date(a.startedAtISO || 0).getTime());
-    res.json({ calls: calls.slice(0, 200) });
+    const calls = await mongoGetAllCalls();
+    res.json({ calls });
   });
 
   // GET /api/ivr/config — lets the frontend know whether Twilio is configured yet,
   // and hands over the (non-secret) IVR menu so the widget/UI can render it.
   app.get("/api/ivr/config", async (_req, res) => {
     res.json({ configured: twilioConfigured, menu: IVR_MENU, callerId: twilioConfigured ? TWILIO_CALLER_ID : null });
+  });
+
+  // POST /api/ivr/transfer — warm-hands a LIVE call to another available agent's browser Client.
+  app.post("/api/ivr/transfer", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.replace("Bearer ", "") || "";
+    const session = await verifyActiveSessionInFirestore(token);
+    if (!session.valid) return res.status(401).json({ error: "Unauthorized" });
+
+    if (!twilioRestClient) {
+      return res.status(503).json({ error: "IVR is not configured yet." });
+    }
+
+    const { callSid, targetAgentId } = req.body || {};
+    if (!callSid || !targetAgentId) {
+      return res.status(400).json({ error: "callSid and targetAgentId are required." });
+    }
+
+    const targetSession = activeSessionsMap.get(String(targetAgentId).toLowerCase());
+    if (!targetSession || targetSession.status !== "available") {
+      return res.status(409).json({ error: "That agent is not currently available." });
+    }
+
+    try {
+      const VoiceResponse = twilio.twiml.VoiceResponse;
+      const twiml = new VoiceResponse();
+      twiml.dial().client(targetSession.agentId);
+      await twilioRestClient.calls(callSid).update({ twiml: twiml.toString() });
+
+      const existing = (await mongoGetCall(callSid)) || { callSid };
+      existing.routedAgentId = targetSession.agentId;
+      existing.routedAgentName = targetSession.name;
+      await mongoUpsertCall(existing);
+
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("[IVR] Transfer failed:", err);
+      res.status(500).json({ error: err?.message || "Transfer failed." });
+    }
+  });
+
+  // POST /api/ivr/summary — save the wrap-up Category/Remark for a call (the "Summary" panel).
+  app.post("/api/ivr/summary", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.replace("Bearer ", "") || "";
+    const session = await verifyActiveSessionInFirestore(token);
+    if (!session.valid) return res.status(401).json({ error: "Unauthorized" });
+
+    const { callSid, category, remark } = req.body || {};
+    if (!callSid) return res.status(400).json({ error: "callSid is required." });
+
+    const existing = (await mongoGetCall(callSid)) || { callSid, startedAtISO: new Date().toISOString(), direction: "inbound", fromNumber: "unknown", toNumber: TWILIO_CALLER_ID, outcome: "connected" };
+    existing.summaryCategory = category ?? existing.summaryCategory;
+    existing.summaryRemark = remark ?? existing.summaryRemark;
+    existing.summaryComplete = !!(existing.summaryCategory && existing.summaryRemark);
+    await mongoUpsertCall(existing);
+
+    res.json({ success: true, call: existing });
+  });
+
+  // GET /api/ivr/customer-history?phone=... — past tickets/interactions for the caller currently on the line,
+  // shown in the "Customer History" panel (matched against the CRM contact's phone number).
+  app.get("/api/ivr/customer-history", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    const token = (req.query.token as string) || authHeader?.replace("Bearer ", "") || "";
+    const session = await verifyActiveSessionInFirestore(token);
+    if (!session.valid) return res.status(401).json({ error: "Unauthorized" });
+
+    const phone = ((req.query.phone as string) || "").trim();
+    if (!phone) return res.json({ history: [], contact: null });
+
+    const normalizedPhone = phone.replace(/\D/g, "").slice(-10);
+    const contacts = await dbGetCollectionDocs("contacts");
+    const matchedContact = contacts.find((c: any) => (c.phone || "").replace(/\D/g, "").slice(-10) === normalizedPhone);
+
+    if (!matchedContact) return res.json({ history: [], contact: null });
+
+    const tickets = await dbGetCollectionDocs("support_tickets");
+    const contactTickets = tickets
+      .filter((t: any) => t.contactId === matchedContact.id)
+      .sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+    const history = contactTickets.map((t: any) => ({
+      id: t.id,
+      label: `${t.category || "General"} / ${t.title || "Issue"}`,
+      createdAt: t.createdAt,
+      csrName: (t.replies && t.replies.length > 0) ? t.replies[t.replies.length - 1].author : "Unassigned",
+    }));
+
+    res.json({ history, contact: { id: matchedContact.id, name: matchedContact.name, phone: matchedContact.phone } });
   });
 
   // =========================================================================

@@ -82,6 +82,9 @@ export interface CallLogEntry {
   recordingUrl?: string;
   startedAtISO: string;
   endedAtISO?: string;
+  summaryCategory?: string;
+  summaryRemark?: string;
+  summaryComplete?: boolean;
 }
 
 export interface IvrMenuOption {

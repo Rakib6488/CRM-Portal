@@ -50,7 +50,8 @@ import {
   Lock as LockIcon,
   Eye,
   EyeOff,
-  Search
+  Search,
+  PhoneCall
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { 
@@ -103,7 +104,7 @@ import AuthGatewayModal from './components/AuthGatewayModal';
 import GlobalSearchModal from './components/GlobalSearchModal';
 import SystemTroubleshooting from './components/SystemTroubleshooting';
 import ConfirmationModal from './components/ConfirmationModal';
-import CallWidget from './components/CallWidget';
+import CallCenterSection from './components/CallCenterSection';
 
 export const AGENTS_LIST = [
   { name: "Israt Jahan Mim", isMale: false },
@@ -549,7 +550,7 @@ export default function App() {
   const [showPassword, setShowPassword] = useState(false);
 
   // Active navigation tab
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'tickets' | 'cs_ticket_form' | 'crm' | 'reports' | 'kb' | 'roster' | 'system_troubleshooting' | 'admin_portal' | 'settings'>(() => {
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'tickets' | 'cs_ticket_form' | 'crm' | 'reports' | 'call_center' | 'kb' | 'roster' | 'system_troubleshooting' | 'admin_portal' | 'settings'>(() => {
     const saved = localStorage.getItem('csp_active_tab');
     if (saved) return saved as any;
     return 'dashboard';
@@ -2389,6 +2390,7 @@ export default function App() {
                 { id: 'cs_ticket_form', label: 'CS Ticket Form', icon: ClipboardList },
                 { id: 'crm', label: 'CRM Customer Base', icon: Users, badge: contacts.length },
                 { id: 'reports', label: 'Agent Reports', icon: BarChart },
+                { id: 'call_center', label: 'CSR Call Center', icon: PhoneCall },
                 { id: 'kb', label: 'Knowledge Base', icon: BookOpen, badge: kbArticles.length },
                 { id: 'roster', label: 'ALL-DAY ROSTER', icon: Calendar, badge: '24/7' },
                 { id: 'settings', label: 'Settings', icon: Settings }
@@ -2658,7 +2660,8 @@ export default function App() {
                   { id: 'cs_ticket_form', label: 'CS Ticket Form', icon: ClipboardList },
                   { id: 'crm', label: 'CRM Customer Base', icon: Users, badge: contacts.length },
                   { id: 'reports', label: 'Agent Reports', icon: BarChart },
-                  { id: 'kb', label: 'Knowledge Base', icon: BookOpen, badge: kbArticles.length },
+                  { id: 'call_center', label: 'CSR Call Center', icon: PhoneCall },
+                    { id: 'kb', label: 'Knowledge Base', icon: BookOpen, badge: kbArticles.length },
                   { id: 'roster', label: 'ALL-DAY ROSTER', icon: Calendar, badge: '24/7' },
                   { id: 'settings', label: 'Settings', icon: Settings }
                 ].map((item) => {
@@ -2992,6 +2995,14 @@ export default function App() {
             />
           )}
 
+          {activeTab === 'call_center' && currentUser && (
+            <CallCenterSection
+              agentId={currentUser.id}
+              agentName={currentUser.name}
+              liveAgentSessions={liveAgentSessions}
+            />
+          )}
+
           {activeTab === 'kb' && (
             <KbSection
               kbArticles={kbArticles}
@@ -3126,14 +3137,6 @@ export default function App() {
         onConfirm={executeHeaderCheckOut}
         onCancel={() => setShowHeaderClockOffConfirm(false)}
       />
-
-      {isPortalLoggedIn && currentUser && (
-        <CallWidget
-          agentId={currentUser.id}
-          agentName={currentUser.name}
-          isActive={isPortalLoggedIn}
-        />
-      )}
 
     </div>
   );
