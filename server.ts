@@ -2263,6 +2263,9 @@ async function startServer() {
   }
 
   function startWhatsAppClient() {
+    if (whatsappClient) {
+      return;
+    }
     const executablePath = resolveChromeExecutable();
     const whatsappAuthDir = path.join(os.homedir(), ".customer-support-portal", ".wwebjs_auth");
     fs.mkdirSync(whatsappAuthDir, { recursive: true });
@@ -2461,6 +2464,24 @@ async function startServer() {
           socket.emit("reply-error", "Reply failed. Check the server logs.");
         }
         return;
+      }
+    });
+
+    socket.on("request-whatsapp-qr", () => {
+      if (whatsappQrDataUrl && !whatsappReady) {
+        socket.emit("whatsapp-qr", whatsappQrDataUrl);
+        return;
+      }
+      if (!whatsappClient) {
+        startWhatsAppClient();
+      }
+    });
+
+    socket.on("request-telegram-connect", () => {
+      if (!telegramClient) {
+        startTelegramClient();
+      } else if (!telegramReady) {
+        startTelegramClient();
       }
     });
 

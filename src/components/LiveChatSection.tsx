@@ -64,6 +64,8 @@ export default function LiveChatSection({ agentName }: LiveChatSectionProps) {
   const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [whatsappQr, setWhatsappQr] = useState<string | null>(null);
+  const [requestingQr, setRequestingQr] = useState(false);
+  const [requestingTelegram, setRequestingTelegram] = useState(false);
   const socketRef = useRef<Socket | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -81,6 +83,7 @@ export default function LiveChatSection({ agentName }: LiveChatSectionProps) {
 
     socket.on('whatsapp-qr', (dataUrl: string | null) => {
       setWhatsappQr(dataUrl);
+      setRequestingQr(false);
     });
 
     socket.on('channel-message', (payload: IncomingMessage) => {
@@ -262,6 +265,42 @@ export default function LiveChatSection({ agentName }: LiveChatSectionProps) {
                 Scan with WhatsApp (Linked Devices) to connect your number:
               </p>
               <img src={whatsappQr} alt="WhatsApp QR code" className="mx-auto rounded-md border border-slate-700" />
+            </div>
+          )}
+          {!whatsappQr && !channelsReady.whatsapp && connected && (
+            <div className="p-4 border-b border-slate-800 bg-slate-800/40 text-center">
+              <p className="text-[11px] text-slate-300 mb-3">
+                WhatsApp is not connected yet. Request a QR code to start the session.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setRequestingQr(true);
+                  socketRef.current?.emit('request-whatsapp-qr');
+                }}
+                disabled={requestingQr}
+                className="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+              >
+                {requestingQr ? 'Waiting for QR…' : 'Connect WhatsApp'}
+              </button>
+            </div>
+          )}
+          {!channelsReady.telegram && connected && (
+            <div className="p-4 border-b border-slate-800 bg-slate-800/40 text-center">
+              <p className="text-[11px] text-slate-300 mb-3">
+                Telegram is not connected. Request the server to connect Telegram now.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setRequestingTelegram(true);
+                  socketRef.current?.emit('request-telegram-connect');
+                }}
+                disabled={requestingTelegram}
+                className="rounded-md bg-sky-600 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-50"
+              >
+                {requestingTelegram ? 'Connecting Telegram…' : 'Connect Telegram'}
+              </button>
             </div>
           )}
           {threadList.length === 0 && (
