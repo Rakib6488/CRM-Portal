@@ -2082,9 +2082,16 @@ export default function App() {
                 localStorage.setItem('csp_user_role', data.user.role);
                 localStorage.setItem('csp_login_time', new Date().toISOString());
 
+                const shouldAutoClockIn = data.user.role === 'ADMIN' || localStorage.getItem(`csp_${data.user.id}_auto_clock_in`) === 'true';
                 setAgentName(data.user.name);
                 setUserRole(data.user.role);
                 setCurrentUser(data.user);
+                setIsCheckedIn(shouldAutoClockIn);
+                setAgentStatus(shouldAutoClockIn ? 'AVAILABLE' : 'OFFLINE');
+                setCurrentActivity(shouldAutoClockIn ? 'available' : 'offline');
+                localStorage.setItem(`csp_${data.user.id}_is_checked_in`, String(shouldAutoClockIn));
+                localStorage.setItem(`csp_${data.user.id}_is_on_break`, 'false');
+                localStorage.setItem(`csp_${data.user.id}_current_activity`, shouldAutoClockIn ? 'available' : 'offline');
                 setIsPortalLoggedIn(true);
 
                 // Hydrate daily duration record from Firestore for this agent

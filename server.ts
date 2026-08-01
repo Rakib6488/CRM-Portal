@@ -751,7 +751,7 @@ async function startServer() {
 
   const loginRateLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 5,
+    max: 25,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: "Too many login attempts from this IP address. Please try again after 15 minutes." }
