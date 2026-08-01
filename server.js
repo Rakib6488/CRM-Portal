@@ -1,4 +1,7 @@
+const os = require("os");
+const fs = require("fs");
 const path = require("path");
+const { execFileSync } = require("child_process");
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -276,11 +279,80 @@ async function startTelegramClient() {
 // if WhatsApp changes WhatsApp Web, and using it for business/bulk messaging
 // risks the number getting rate-limited or banned. Use a number you're OK
 // taking that risk with.
+function resolveChromeExecutable() {
+  const userProfile = process.env.USERPROFILE || process.env.HOME || __dirname;
+  const candidatePaths = [
+    process.env.CHROME_BIN,
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    process.env.GOOGLE_CHROME_BIN,
+    path.join(userProfile, ".cache", "puppeteer", "chrome", "chrome-win64", "chrome.exe"),
+    path.join(userProfile, ".cache", "puppeteer", "chrome", "win64-146.0.7680.31", "chrome-win64", "chrome.exe"),
+    path.join(userProfile, ".cache", "puppeteer", "chrome-headless-shell", "chrome-headless-shell-win64", "chrome-headless-shell.exe"),
+    path.join(userProfile, ".cache", "puppeteer", "chrome-headless-shell", "win64-146.0.7680.31", "chrome-headless-shell-win64", "chrome-headless-shell.exe"),
+    path.join(process.env.ProgramFiles || "C:\\Program Files", "Google", "Chrome", "Application", "chrome.exe"),
+    path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Google", "Chrome", "Application", "chrome.exe"),
+  ].filter(Boolean);
+
+  for (const candidate of candidatePaths) {
+    if (candidate && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  const puppeteerRoot = path.join(userProfile, ".cache", "puppeteer");
+  const zipPaths = [
+    path.join(puppeteerRoot, "chrome", "146.0.7680.31-chrome-win64.zip"),
+    path.join(puppeteerRoot, "chrome-headless-shell", "146.0.7680.31-chrome-headless-shell-win64.zip"),
+  ];
+
+  for (const zipPath of zipPaths) {
+    if (fs.existsSync(zipPath)) {
+      try {
+        console.warn("Chrome executable missing; extracting the cached browser archive...");
+        const outputDir = path.dirname(zipPath);
+        execFileSync(
+          "powershell",
+          [
+            "-NoProfile",
+            "-Command",
+            `Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${outputDir}' -Force`,
+          ],
+          { stdio: "inherit" },
+        );
+      } catch (error) {
+        console.error("Could not extract Chrome archive:", error);
+      }
+      break;
+    }
+  }
+
+  const fallbackCandidates = [];
+  function walk(dir) {
+    if (!fs.existsSync(dir)) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(fullPath);
+      } else if (/chrome(?:-headless-shell)?\.exe$/i.test(entry.name)) {
+        fallbackCandidates.push(fullPath);
+      }
+    }
+  }
+  walk(puppeteerRoot);
+
+  return fallbackCandidates[0] || null;
+}
+
 function startWhatsAppClient() {
+  const executablePath = resolveChromeExecutable();
+  const whatsappAuthDir = path.join(os.homedir(), ".customer-support-portal", ".wwebjs_auth");
+  fs.mkdirSync(whatsappAuthDir, { recursive: true });
+
   whatsappClient = new WhatsAppClient({
-    authStrategy: new LocalAuth({ dataPath: path.join(__dirname, ".wwebjs_auth") }),
+    authStrategy: new LocalAuth({ dataPath: whatsappAuthDir }),
     puppeteer: {
       headless: true,
+      executablePath: executablePath || undefined,
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
     },
   });
