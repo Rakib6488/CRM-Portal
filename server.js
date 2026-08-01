@@ -287,10 +287,16 @@ function resolveChromeExecutable() {
     process.env.GOOGLE_CHROME_BIN,
     path.join(userProfile, ".cache", "puppeteer", "chrome", "chrome-win64", "chrome.exe"),
     path.join(userProfile, ".cache", "puppeteer", "chrome", "win64-146.0.7680.31", "chrome-win64", "chrome.exe"),
+    path.join(userProfile, ".cache", "puppeteer", "chrome", "chrome-linux64", "chrome"),
+    path.join(userProfile, ".cache", "puppeteer", "chrome", "linux-146.0.7680.31", "chrome-linux64", "chrome"),
     path.join(userProfile, ".cache", "puppeteer", "chrome-headless-shell", "chrome-headless-shell-win64", "chrome-headless-shell.exe"),
     path.join(userProfile, ".cache", "puppeteer", "chrome-headless-shell", "win64-146.0.7680.31", "chrome-headless-shell-win64", "chrome-headless-shell.exe"),
+    path.join(userProfile, ".cache", "puppeteer", "chrome-headless-shell", "chrome-headless-shell-linux64", "chrome-headless-shell"),
+    path.join(userProfile, ".cache", "puppeteer", "chrome-headless-shell", "linux-146.0.7680.31", "chrome-headless-shell-linux64", "chrome-headless-shell"),
     path.join(process.env.ProgramFiles || "C:\\Program Files", "Google", "Chrome", "Application", "chrome.exe"),
     path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Google", "Chrome", "Application", "chrome.exe"),
+    "/opt/render/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome",
+    "/opt/render/.cache/puppeteer/chrome-headless-shell/linux-146.0.7680.31/chrome-headless-shell-linux64/chrome-headless-shell",
   ].filter(Boolean);
 
   for (const candidate of candidatePaths) {
@@ -299,11 +305,21 @@ function resolveChromeExecutable() {
     }
   }
 
-  const puppeteerRoot = path.join(userProfile, ".cache", "puppeteer");
-  const zipPaths = [
-    path.join(puppeteerRoot, "chrome", "146.0.7680.31-chrome-win64.zip"),
-    path.join(puppeteerRoot, "chrome-headless-shell", "146.0.7680.31-chrome-headless-shell-win64.zip"),
-  ];
+  const puppeteerRoots = [
+    path.join(userProfile, ".cache", "puppeteer"),
+    process.env.PUPPETEER_CACHE_DIR,
+    "/opt/render/.cache/puppeteer",
+  ].filter(Boolean);
+
+  const zipPaths = [];
+  for (const root of puppeteerRoots) {
+    zipPaths.push(
+      path.join(root, "chrome", "146.0.7680.31-chrome-win64.zip"),
+      path.join(root, "chrome", "146.0.7680.31-chrome-linux64.zip"),
+      path.join(root, "chrome-headless-shell", "146.0.7680.31-chrome-headless-shell-win64.zip"),
+      path.join(root, "chrome-headless-shell", "146.0.7680.31-chrome-headless-shell-linux64.zip"),
+    );
+  }
 
   for (const zipPath of zipPaths) {
     if (fs.existsSync(zipPath)) {
@@ -333,12 +349,16 @@ function resolveChromeExecutable() {
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         walk(fullPath);
-      } else if (/chrome(?:-headless-shell)?\.exe$/i.test(entry.name)) {
-        fallbackCandidates.push(fullPath);
+      } else if (/chrome(?:-headless-shell)?(?:\.exe|)$/i.test(entry.name)) {
+        if (entry.name === "chrome" || entry.name === "chrome-headless-shell") {
+          fallbackCandidates.push(fullPath);
+        }
       }
     }
   }
-  walk(puppeteerRoot);
+  for (const root of puppeteerRoots) {
+    walk(root);
+  }
 
   return fallbackCandidates[0] || null;
 }
