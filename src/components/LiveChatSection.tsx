@@ -66,6 +66,8 @@ export default function LiveChatSection({ agentName }: LiveChatSectionProps) {
   const [whatsappQr, setWhatsappQr] = useState<string | null>(null);
   const [requestingQr, setRequestingQr] = useState(false);
   const [requestingTelegram, setRequestingTelegram] = useState(false);
+  const [telegramStatusMessage, setTelegramStatusMessage] = useState<string | null>(null);
+  const [whatsappStatusMessage, setWhatsappStatusMessage] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -128,6 +130,30 @@ export default function LiveChatSection({ agentName }: LiveChatSectionProps) {
     socket.on('reply-error', (message: string) => {
       setError(message);
       setSending(false);
+    });
+
+    socket.on('telegram-connecting', () => {
+      setTelegramStatusMessage('Connecting Telegram...');
+      setRequestingTelegram(true);
+    });
+
+    socket.on('telegram-connected', () => {
+      setTelegramStatusMessage('Telegram connected.');
+      setRequestingTelegram(false);
+    });
+
+    socket.on('telegram-connect-failed', (message: string) => {
+      setTelegramStatusMessage(message);
+      setRequestingTelegram(false);
+    });
+
+    socket.on('whatsapp-connecting', () => {
+      setWhatsappStatusMessage('Requesting WhatsApp QR...');
+      setRequestingQr(true);
+    });
+
+    return () => {
+      socket.disconnect();
     });
 
     return () => {
@@ -276,6 +302,7 @@ export default function LiveChatSection({ agentName }: LiveChatSectionProps) {
                 type="button"
                 onClick={() => {
                   setRequestingQr(true);
+                  setWhatsappStatusMessage('Requesting WhatsApp QR...');
                   socketRef.current?.emit('request-whatsapp-qr');
                 }}
                 disabled={requestingQr}
@@ -283,6 +310,9 @@ export default function LiveChatSection({ agentName }: LiveChatSectionProps) {
               >
                 {requestingQr ? 'Waiting for QR…' : 'Connect WhatsApp'}
               </button>
+              {whatsappStatusMessage && (
+                <p className="mt-2 text-[10px] text-slate-400">{whatsappStatusMessage}</p>
+              )}
             </div>
           )}
           {!channelsReady.telegram && connected && (
@@ -294,6 +324,7 @@ export default function LiveChatSection({ agentName }: LiveChatSectionProps) {
                 type="button"
                 onClick={() => {
                   setRequestingTelegram(true);
+                  setTelegramStatusMessage('Connecting Telegram...');
                   socketRef.current?.emit('request-telegram-connect');
                 }}
                 disabled={requestingTelegram}
@@ -301,6 +332,9 @@ export default function LiveChatSection({ agentName }: LiveChatSectionProps) {
               >
                 {requestingTelegram ? 'Connecting Telegram…' : 'Connect Telegram'}
               </button>
+              {telegramStatusMessage && (
+                <p className="mt-2 text-[10px] text-slate-400">{telegramStatusMessage}</p>
+              )}
             </div>
           )}
           {threadList.length === 0 && (

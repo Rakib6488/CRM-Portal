@@ -2133,8 +2133,16 @@ async function startServer() {
   }
 
   async function startTelegramClient() {
-    if (!apiId || !apiHash || !sessionValue) {
-      console.warn("Telegram env is missing. Set TELEGRAM_API_ID, TELEGRAM_API_HASH, and TELEGRAM_SESSION to enable live chat.");
+    if (!apiId || !apiHash) {
+      console.warn("Telegram env is missing. Set TELEGRAM_API_ID and TELEGRAM_API_HASH to enable live chat.");
+      io?.emit("telegram-connect-failed", "Telegram env missing. Set TELEGRAM_API_ID and TELEGRAM_API_HASH.");
+      publishServerStatus();
+      return;
+    }
+
+    if (!sessionValue) {
+      console.warn("Telegram session string is missing. Set TELEGRAM_SESSION to connect your Telegram account.");
+      io?.emit("telegram-connect-failed", "Telegram auth session missing. Set TELEGRAM_SESSION.");
       publishServerStatus();
       return;
     }
@@ -2147,11 +2155,13 @@ async function startServer() {
       await telegramClient.connect();
       telegramReady = true;
       publishServerStatus();
+      io?.emit("telegram-connected");
       console.log("Telegram client connected.");
     } catch (error) {
       telegramReady = false;
       publishServerStatus();
       console.error("Telegram connection failed:", error);
+      io?.emit("telegram-connect-failed", "Telegram connection failed. Check server logs and environment variables.");
       return;
     }
 
@@ -2468,20 +2478,26 @@ async function startServer() {
     });
 
     socket.on("request-whatsapp-qr", () => {
+      socket.emit("whatsapp-connecting");
       if (whatsappQrDataUrl && !whatsappReady) {
         socket.emit("whatsapp-qr", whatsappQrDataUrl);
         return;
       }
       if (!whatsappClient) {
         startWhatsAppClient();
+      } else if (!whatsappReady) {
+        startWhatsAppClient();
       }
     });
 
     socket.on("request-telegram-connect", () => {
+      socket.emit("telegram-connecting");
       if (!telegramClient) {
         startTelegramClient();
       } else if (!telegramReady) {
         startTelegramClient();
+      } else {
+        socket.emit("telegram-connected");
       }
     });
 
