@@ -133,7 +133,7 @@ export default function AdminSection({
   const [notifications, setNotifications] = useState<string[]>([]);
 
   // 📈 Reports Engine State
-  const [repType, setRepType] = useState<'breaks' | 'sessions' | 'tickets' | 'contacts' | 'roster'>('breaks');
+  const [repType, setRepType] = useState<'breaks' | 'sessions' | 'tickets' | 'contacts' | 'roster' | 'users' | 'credentials' | 'activity_logs'>('breaks');
   const [repDateMode, setRepDateMode] = useState<'all' | 'day' | 'month' | 'range'>('all');
   const [repDate, setRepDate] = useState(new Date().toISOString().substring(0, 10));
   const [repMonth, setRepMonth] = useState(new Date().toISOString().substring(0, 7));

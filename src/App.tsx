@@ -55,6 +55,14 @@ import {
   MessageCircle
 } from 'lucide-react';
 import { User } from 'firebase/auth';
+import type {
+  AgentCredential,
+  CRMContact,
+  KBArticle,
+  LiveAgentSession,
+  RosterDay,
+  SupportTicket,
+} from './types';
 import { 
   auth,
   initAuth, 

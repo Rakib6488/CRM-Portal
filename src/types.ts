@@ -148,6 +148,7 @@ export interface AgentPerformanceMetric {
   slaCompliancePercent: number;
   status: 'Online' | 'On Break' | 'Offline' | 'Idle';
   lastUpdatedISO: string;
+  updatedAt?: string;
   firstContactResolutionPercent?: number;
 }
 

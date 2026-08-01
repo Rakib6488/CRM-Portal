@@ -35,6 +35,7 @@ export default function CallCenterSection(props: CallCenterSectionProps) {
   // state that doesn't match reality.
   const mySession = liveAgentSessions.find(s => s.agentId && s.agentId.toLowerCase() === agentId.toLowerCase());
   const readyForCalls = mySession?.status === 'available';
+  const currentDeviceStatus = deviceStatus as 'offline' | 'connecting' | 'ready' | 'unavailable' | 'error';
   const [readySaving, setReadySaving] = useState(false);
 
   async function handleToggleReady() {
@@ -156,7 +157,7 @@ export default function CallCenterSection(props: CallCenterSectionProps) {
           <Bot className="w-5 h-5 text-indigo-500" />
         </div>
 
-        {deviceStatus === 'ready' || deviceStatus === 'connecting' ? (
+        {currentDeviceStatus === 'ready' || currentDeviceStatus === 'connecting' ? (
           <button
             onClick={disconnectDevice}
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-red-600 hover:bg-red-700 text-white transition-colors"
@@ -166,7 +167,7 @@ export default function CallCenterSection(props: CallCenterSectionProps) {
         ) : (
           <button
             onClick={connect}
-            disabled={ivrConfigured === null || deviceStatus === 'connecting'}
+            disabled={ivrConfigured === null || currentDeviceStatus === 'connecting'}
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-[#6A00D1] hover:bg-[#5800B0] text-white transition-colors disabled:opacity-50"
           >
             Connect
