@@ -154,10 +154,6 @@ export default function LiveChatSection({ agentName }: LiveChatSectionProps) {
 
     return () => {
       socket.disconnect();
-    });
-
-    return () => {
-      socket.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
