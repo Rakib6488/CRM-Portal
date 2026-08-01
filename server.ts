@@ -23,7 +23,16 @@ import {
 import { initializeApp as initAdminApp, getApps as getAdminApps, cert } from "firebase-admin/app";
 import { getFirestore as getAdminFirestore } from "firebase-admin/firestore";
 
-dotenv.config();
+const envLocalPath = path.resolve(process.cwd(), '.env.local');
+const dotenvResult = fs.existsSync(envLocalPath)
+  ? dotenv.config({ path: envLocalPath })
+  : dotenv.config();
+
+if (dotenvResult.error) {
+  console.warn('[Server] dotenv failed to load .env.local or .env:', dotenvResult.error);
+} else if (dotenvResult.parsed) {
+  console.log('[Server] Loaded environment variables from', fs.existsSync(envLocalPath) ? '.env.local' : '.env');
+}
 
 // Server Secret for HMAC JWT Session Signing (Uses default dev key if process.env.SERVER_SECRET is undefined)
 const SERVER_SECRET = process.env.SERVER_SECRET || "crm-default-dev-secret-key-2026-fallback";
@@ -447,6 +456,7 @@ interface VerifiedSessionResult {
     deviceType: 'web' | 'mobile';
     sessionId: string;
     tokenVersion?: number;
+    iat?: number;
   };
 }
 
@@ -478,7 +488,8 @@ function verifySessionToken(token: string): VerifiedSessionResult {
         role: decoded.role,
         deviceType: decoded.deviceType || 'web',
         sessionId: decoded.sessionId || '',
-        tokenVersion: decoded.tokenVersion || 1
+        tokenVersion: decoded.tokenVersion || 1,
+        iat: decoded.iat || 0
       }
     };
   } catch (e) {
@@ -492,7 +503,7 @@ async function verifyActiveSessionInFirestore(token: string): Promise<VerifiedSe
     return baseResult;
   }
 
-  const { id: agentId, deviceType, sessionId, tokenVersion } = baseResult.user;
+  const { id: agentId, deviceType, sessionId, tokenVersion, iat } = baseResult.user;
   const cleanId = agentId.toLowerCase();
 
   try {
@@ -512,6 +523,22 @@ async function verifyActiveSessionInFirestore(token: string): Promise<VerifiedSe
     // 2. Verify active session pointer in Firestore
     const activeDoc = await dbGetDoc('active_sessions', `${cleanId}_${deviceType}`);
     if (activeDoc && activeDoc.sessionId && activeDoc.sessionId !== sessionId) {
+      const activeTimestamp = activeDoc.timestamp ? Date.parse(activeDoc.timestamp) : 0;
+      const tokenIssuedAt = iat ? iat * 1000 : 0;
+
+      // If the token was issued after the recorded active-session pointer, refresh the pointer and allow.
+      if (tokenIssuedAt >= activeTimestamp) {
+        await dbSetDoc('active_sessions', `${cleanId}_${deviceType}`, {
+          agentId: cleanId,
+          deviceType,
+          sessionId,
+          timestamp: new Date().toISOString(),
+          loginTime: activeDoc.loginTime || new Date().toISOString(),
+          userAgent: activeDoc.userAgent || ''
+        });
+        return baseResult;
+      }
+
       return {
         valid: false,
         reason: 'revoked',
@@ -687,7 +714,7 @@ function broadcastRealtimeEvent(
 async function startServer() {
   const app = express();
   app.set('trust proxy', 1);
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT || process.env.SERVER_PORT || 10000);
 
   // Item 7: Security Headers using Helmet
   app.use(helmet({
@@ -880,6 +907,28 @@ async function startServer() {
     }
     const result = await verifyActiveSessionInFirestore(parseResult.data.token);
     return res.json(result);
+  });
+
+  // POST /api/auth/logout
+  app.post("/api/auth/logout", async (req, res) => {
+    const parseResult = VerifySessionSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      return res.status(400).json({ success: false, error: "Session token is required." });
+    }
+
+    const baseResult = verifySessionToken(parseResult.data.token);
+    if (!baseResult.valid || !baseResult.user) {
+      return res.json({ success: true });
+    }
+
+    const { id: agentId, deviceType } = baseResult.user;
+    try {
+      await dbDeleteDoc('active_sessions', `${agentId.toLowerCase()}_${deviceType}`);
+    } catch (err) {
+      console.warn("Failed to clear active session during logout:", err);
+    }
+
+    return res.json({ success: true });
   });
 
   // GET /api/auth/agents (Returns safe list)

@@ -1956,6 +1956,19 @@ export default function App() {
       }
     }
 
+    const savedToken = sessionStorage.getItem('csp_session_token') || localStorage.getItem('csp_session_token');
+    if (savedToken) {
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: savedToken })
+        });
+      } catch (e) {
+        console.error("Failed to clear portal session on logout:", e);
+      }
+    }
+
     const savedId = currentUser?.id || localStorage.getItem('csp_logged_in_agent_id');
     if (savedId) {
       try {
