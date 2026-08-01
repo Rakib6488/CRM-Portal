@@ -51,7 +51,8 @@ import {
   Eye,
   EyeOff,
   Search,
-  PhoneCall
+  PhoneCall,
+  MessageCircle
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { 
@@ -78,7 +79,10 @@ import {
   getUtcDateStr,
   listenToActiveSession,
   getDailyDurationDoc,
-  saveDailyDurationDoc
+  saveDailyDurationDoc,
+  listenToKbArticles,
+  saveKbArticleToFirestore,
+  deleteKbArticleFromFirestore
 } from './firebase';
 import {
   createAndExportRosterToSheet,
@@ -105,6 +109,9 @@ import GlobalSearchModal from './components/GlobalSearchModal';
 import SystemTroubleshooting from './components/SystemTroubleshooting';
 import ConfirmationModal from './components/ConfirmationModal';
 import CallCenterSection from './components/CallCenterSection';
+import LiveChatSection from './components/LiveChatSection';
+import CallFloatingPopup from './components/CallFloatingPopup';
+import { useCallCenter } from './hooks/useCallCenter';
 
 export const AGENTS_LIST = [
   { name: "Israt Jahan Mim", isMale: false },
@@ -297,6 +304,7 @@ export default function App() {
   const [isPortalLoggedIn, setIsPortalLoggedIn] = useState<boolean>(false);
   const [agentName, setAgentName] = useState<string>('');
   const [currentUser, setCurrentUser] = useState<{ id: string; name: string; role: 'AGENT' | 'ADMIN' } | null>(null);
+  const callCenter = useCallCenter(isPortalLoggedIn && !!currentUser);
   const [userRole, setUserRole] = useState<'AGENT' | 'ADMIN'>('AGENT');
 
   // Single Session & Daily Duration State
@@ -550,7 +558,7 @@ export default function App() {
   const [showPassword, setShowPassword] = useState(false);
 
   // Active navigation tab
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'tickets' | 'cs_ticket_form' | 'crm' | 'reports' | 'call_center' | 'kb' | 'roster' | 'system_troubleshooting' | 'admin_portal' | 'settings'>(() => {
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'tickets' | 'cs_ticket_form' | 'crm' | 'reports' | 'call_center' | 'live_chat' | 'kb' | 'roster' | 'system_troubleshooting' | 'admin_portal' | 'settings'>(() => {
     const saved = localStorage.getItem('csp_active_tab');
     if (saved) return saved as any;
     return 'dashboard';
@@ -1150,39 +1158,34 @@ export default function App() {
     const saved = localStorage.getItem('csp_kb_articles');
     if (saved) {
       try {
-        let parsed: KBArticle[] = JSON.parse(saved);
-        // Exclude old template legacy/demo articles (e.g. Acme SLA onboarding)
-        // We preserve PalmPay articles (kb-palmpay-*) and user-created custom articles (kb-[timestamp])
-        parsed = parsed.filter(a => {
-          if (a.id.startsWith('kb-palmpay-')) return true;
-          if (/^kb-\d{10,}/.test(a.id)) return true;
-          return false;
-        });
-        // Dynamically refresh PalmPay template articles to update categories/content
-        parsed = parsed.map(a => {
-          if (a.id.startsWith('kb-palmpay-')) {
-            const fresh = INITIAL_KB_ARTICLES.find(f => f.id === a.id);
-            if (fresh) return fresh;
-          }
-          return a;
-        });
-        const parsedIds = new Set(parsed.map(a => a.id));
-        const missing = INITIAL_KB_ARTICLES.filter(a => !parsedIds.has(a.id));
-        if (missing.length > 0) {
-          return [...parsed, ...missing];
-        }
-        return parsed;
-      } catch (e) {
-        console.error("Error parsing local KB articles, resetting to defaults", e);
+        return JSON.parse(saved);
+      } catch {
         return INITIAL_KB_ARTICLES;
       }
     }
     return INITIAL_KB_ARTICLES;
   });
 
+  // Knowledge Base now lives in Firestore (shared/live across every agent)
+  // instead of per-browser localStorage. On first connect, if Firestore has
+  // nothing yet but this browser has locally-created articles, migrate them
+  // once so nothing already written is lost.
   useEffect(() => {
-    localStorage.setItem('csp_kb_articles', JSON.stringify(kbArticles));
-  }, [kbArticles]);
+    if (!isPortalLoggedIn) return;
+    let migrated = false;
+
+    const unsubscribe = listenToKbArticles((articles) => {
+      if (articles.length === 0 && !migrated && kbArticles.length > 0) {
+        migrated = true;
+        kbArticles.forEach(a => { saveKbArticleToFirestore(a); });
+        return; // the migration writes will trigger this listener again with real data
+      }
+      setKbArticles(articles);
+    });
+
+    return () => unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPortalLoggedIn]);
 
   // Roster Seed parameters
   const [currentRosterYear, setCurrentRosterYear] = useState<number>(2026);
@@ -1244,11 +1247,11 @@ export default function App() {
         return agentObj ? agentObj.isMale : false;
       });
       
-      const nightIndex = (day * 3 + seed * 11) % activeMales.length;
-      const nightShifts = [
+      const nightIndex = activeMales.length > 0 ? (day * 3 + seed * 11) % activeMales.length : -1;
+      const nightShifts = activeMales.length > 0 ? [
         activeMales[nightIndex],
         activeMales[(nightIndex + 1) % activeMales.length]
-      ];
+      ] : [];
       
       const remainingActive = activeAgents.filter(name => !nightShifts.includes(name));
       
@@ -1260,15 +1263,46 @@ export default function App() {
         shuffledActive[i] = shuffledActive[j];
         shuffledActive[j] = temp;
       }
-      
-      const morning = shuffledActive.slice(0, 3);
-      const standardDay = shuffledActive.slice(3, 8);
-      const afternoon = shuffledActive.slice(8, 16);
-      
-      const remainingForLateAndEvening = shuffledActive.slice(16);
-      const half = Math.floor(remainingForLateAndEvening.length / 2);
-      const lateDay = remainingForLateAndEvening.slice(0, half);
-      const evening = remainingForLateAndEvening.slice(half);
+
+      // Aim for the declared per-shift targets (morning/standardDay/lateDay/
+      // afternoon/evening — night is already handled above). On a normal
+      // ~45-agent roster with 1 rest day/week, only ~38-39 agents are active
+      // per day, which is fewer than the targets add up to (40) — so on
+      // short days we scale every shift down proportionally instead of
+      // silently shorting only Late Day/Evening (which is what fixed slice
+      // cutoffs used to do, making those two shifts look permanently
+      // under-staffed even on a correctly-generated schedule). Any surplus
+      // on a lighter off-day beyond the targets goes to Afternoon.
+      const dayTargets: Record<string, number> = { morning: 3, standardDay: 5, lateDay: 12, afternoon: 8, evening: 12 };
+      const targetOrder = ['morning', 'standardDay', 'lateDay', 'afternoon', 'evening'];
+      const targetSum = targetOrder.reduce((s, k) => s + dayTargets[k], 0);
+      const available = shuffledActive.length;
+
+      const counts: Record<string, number> = {};
+      if (available >= targetSum) {
+        targetOrder.forEach(k => { counts[k] = dayTargets[k]; });
+        counts.afternoon += (available - targetSum);
+      } else {
+        const scale = available / targetSum;
+        targetOrder.forEach(k => { counts[k] = Math.floor(dayTargets[k] * scale); });
+        let assigned = targetOrder.reduce((s, k) => s + counts[k], 0);
+        let diff = available - assigned;
+        // Distribute any rounding remainder, largest shifts first, until the count matches exactly.
+        const distributionOrder = ['lateDay', 'evening', 'afternoon', 'standardDay', 'morning'];
+        let idx = 0;
+        while (diff > 0 && idx < distributionOrder.length * 4) {
+          counts[distributionOrder[idx % distributionOrder.length]]++;
+          diff--;
+          idx++;
+        }
+      }
+
+      let cursor = 0;
+      const morning = shuffledActive.slice(cursor, cursor += counts.morning);
+      const standardDay = shuffledActive.slice(cursor, cursor += counts.standardDay);
+      const lateDay = shuffledActive.slice(cursor, cursor += counts.lateDay);
+      const afternoon = shuffledActive.slice(cursor, cursor += counts.afternoon);
+      const evening = shuffledActive.slice(cursor, cursor += counts.evening);
       
       roster.push({
         id: `roster-${dateStr}`,
@@ -2391,6 +2425,7 @@ export default function App() {
                 { id: 'crm', label: 'CRM Customer Base', icon: Users, badge: contacts.length },
                 { id: 'reports', label: 'Agent Reports', icon: BarChart },
                 { id: 'call_center', label: 'CSR Call Center', icon: PhoneCall },
+                { id: 'live_chat', label: 'Live Chat', icon: MessageCircle },
                 { id: 'kb', label: 'Knowledge Base', icon: BookOpen, badge: kbArticles.length },
                 { id: 'roster', label: 'ALL-DAY ROSTER', icon: Calendar, badge: '24/7' },
                 { id: 'settings', label: 'Settings', icon: Settings }
@@ -2661,6 +2696,7 @@ export default function App() {
                   { id: 'crm', label: 'CRM Customer Base', icon: Users, badge: contacts.length },
                   { id: 'reports', label: 'Agent Reports', icon: BarChart },
                   { id: 'call_center', label: 'CSR Call Center', icon: PhoneCall },
+                  { id: 'live_chat', label: 'Live Chat', icon: MessageCircle },
                     { id: 'kb', label: 'Knowledge Base', icon: BookOpen, badge: kbArticles.length },
                   { id: 'roster', label: 'ALL-DAY ROSTER', icon: Calendar, badge: '24/7' },
                   { id: 'settings', label: 'Settings', icon: Settings }
@@ -3000,7 +3036,12 @@ export default function App() {
               agentId={currentUser.id}
               agentName={currentUser.name}
               liveAgentSessions={liveAgentSessions}
+              {...callCenter}
             />
+          )}
+
+          {activeTab === 'live_chat' && currentUser && (
+            <LiveChatSection agentName={currentUser.name} />
           )}
 
           {activeTab === 'kb' && (
@@ -3137,6 +3178,20 @@ export default function App() {
         onConfirm={executeHeaderCheckOut}
         onCancel={() => setShowHeaderClockOffConfirm(false)}
       />
+
+      {isPortalLoggedIn && currentUser && activeTab !== 'call_center' && (
+        <CallFloatingPopup
+          callState={callCenter.callState}
+          callerNumber={callCenter.callerNumber}
+          muted={callCenter.muted}
+          elapsedSec={callCenter.elapsedSec}
+          acceptCall={callCenter.acceptCall}
+          rejectCall={callCenter.rejectCall}
+          hangUp={callCenter.hangUp}
+          toggleMute={callCenter.toggleMute}
+          onOpenFullPage={() => setActiveTab('call_center')}
+        />
+      )}
 
     </div>
   );

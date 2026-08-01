@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { KBArticle } from '../types';
 import ConfirmationModal from './ConfirmationModal';
+import { saveKbArticleToFirestore, deleteKbArticleFromFirestore } from '../firebase';
 
 interface KbSectionProps {
   kbArticles: KBArticle[];
@@ -147,17 +148,15 @@ export default function KbSection({
     const nowStr = new Date().toISOString();
 
     if (editingArticle) {
-      const updated = kbArticles.map(a => a.id === editingArticle.id ? {
-        ...a,
-        ...articleForm,
-        updatedAt: nowStr
-      } : a);
-      setKbArticles(updated);
-      setSelectedArticle({
+      const updatedArticle: KBArticle = {
         ...editingArticle,
         ...articleForm,
         updatedAt: nowStr
-      });
+      };
+      const updated = kbArticles.map(a => a.id === editingArticle.id ? updatedArticle : a);
+      setKbArticles(updated);
+      setSelectedArticle(updatedArticle);
+      saveKbArticleToFirestore(updatedArticle);
       logActivity(`Updated Knowledge Base article: "${articleForm.title}"`);
     } else {
       const newArt: KBArticle = {
@@ -171,6 +170,7 @@ export default function KbSection({
       };
       setKbArticles([newArt, ...kbArticles]);
       setSelectedArticle(newArt);
+      saveKbArticleToFirestore(newArt);
       logActivity(`Created new Knowledge Base article: "${articleForm.title}"`);
     }
     setShowArticleModal(false);
@@ -189,9 +189,13 @@ export default function KbSection({
   const handleConfirmDeleteArticle = () => {
     if (!deleteArticleConfirm) return;
     const { id, title } = deleteArticleConfirm;
+    const articleToDelete = kbArticles.find(a => a.id === id);
     setKbArticles(kbArticles.filter(a => a.id !== id));
     if (selectedArticle?.id === id) {
       setSelectedArticle(kbArticles.find(a => a.id !== id) || null);
+    }
+    if (articleToDelete) {
+      deleteKbArticleFromFirestore(articleToDelete, agentName || 'System Admin');
     }
     logActivity(`Deleted Knowledge Base article: "${title}"`);
     setDeleteArticleConfirm(null);
@@ -356,28 +360,25 @@ export default function KbSection({
               </div>
             </div>
 
-            {/* Local Article list */}
+            {/* Local Article list — titles only; click any to see full details on the right */}
             <div className="flex-1 overflow-y-auto divide-y divide-zinc-200 dark:divide-zinc-800/40">
               {filteredArticles.length > 0 ? (
                 filteredArticles.map(art => {
                   const isSelected = selectedArticle?.id === art.id;
                   return (
-                    <div
+                    <button
                       key={art.id}
                       onClick={() => setSelectedArticle(art)}
-                      className={`p-4 text-left transition-all cursor-pointer border-l-4 ${
+                      className={`w-full flex items-center gap-2 px-4 py-3 text-left transition-all cursor-pointer border-l-4 ${
                         isSelected
                           ? 'bg-zinc-100/70 dark:bg-zinc-800/45 border-amber-600 dark:border-amber-500'
                           : 'border-transparent hover:bg-zinc-50 dark:hover:bg-zinc-850/30'
                       }`}
+                      title={art.category}
                     >
-                      <div className="flex justify-between items-center gap-2 mb-1">
-                        <span className="text-[9px] font-mono font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider">{art.category}</span>
-                        <span className="text-[9px] text-zinc-400 dark:text-zinc-550 font-mono">{new Date(art.updatedAt).toLocaleDateString()}</span>
-                      </div>
-                      <h4 className="font-bold text-xs text-zinc-850 dark:text-zinc-100 line-clamp-1 mb-1 font-sans">{art.title}</h4>
-                      <p className="text-[11px] text-zinc-500 line-clamp-2 leading-relaxed font-sans">{art.content}</p>
-                    </div>
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                      <span className="font-bold text-xs text-zinc-850 dark:text-zinc-100 line-clamp-1 font-sans">{art.title}</span>
+                    </button>
                   );
                 })
               ) : (

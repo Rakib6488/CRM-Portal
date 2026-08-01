@@ -8,18 +8,27 @@ agent is currently "available".
 - `server.ts`: `/api/ivr/token`, `/api/ivr/voice`, `/api/ivr/route`,
   `/api/ivr/status-callback`, `/api/ivr/calls`, `/api/ivr/config`,
   `/api/ivr/transfer`, `/api/ivr/summary`, `/api/ivr/customer-history`
-- `src/components/CallCenterSection.tsx`: a dedicated **"CSR Call Center"**
-  page (new sidebar item, next to Agent Reports) — not a popup. Toolbar with
-  Connect/Disconnect, a Ready toggle, Transfer (to another available agent),
-  Mute, and Hangup; below it a **Customer History** panel (past tickets for
-  whoever is calling, matched by phone number) and a **Summary** panel
-  (Category + Remark, Save button, Complete/Incomplete indicator).
+- `src/hooks/useCallCenter.ts`: owns the Twilio Device + live call state at
+  the top of the app (in `App.tsx`), so an active or ringing call survives
+  switching tabs — it doesn't get destroyed just because you navigated away.
+- `src/components/CallCenterSection.tsx`: the full **"CSR Call Center"**
+  page (sidebar item, next to Agent Reports) — Connect/Disconnect, Ready
+  toggle, Transfer, Mute, Hangup, an Answer/Decline banner while ringing, a
+  **Customer History** panel, and a **Summary** panel.
+- `src/components/CallFloatingPopup.tsx`: a small dark, right-side floating
+  popup that appears **only while a call is ringing or connected**, on
+  every page **except** the CSR Call Center page itself (which already has
+  the full controls). Shows the caller number, status, and just the
+  essentials — Answer/Decline while ringing, Mute/Hangup once connected —
+  plus a button to jump straight to the full page. It reads from the same
+  shared state as the full page, so accepting a call from the popup (or
+  from the full page) keeps everything in sync.
 - `src/types.ts`: `CallLogEntry` (+ summary fields), `IvrMenuOption` types
 - `.env.example`: new `TWILIO_*` variables
 - `package.json`: added `twilio` (server SDK) and `@twilio/voice-sdk` (browser SDK)
 
-Note: the earlier floating bottom-right popup widget has been removed — all
-call handling now lives on this one page, matching the reference screenshot.
+Incoming calls are no longer auto-answered — you'll see Answer/Decline
+either on the popup or on the full page, whichever you're looking at.
 
 ### How "Ready" and "Connect/Disconnect" differ
 - **Connect / Disconnect** — registers/unregisters the browser as a Twilio

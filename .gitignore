@@ -1,9 +1,4 @@
 node_modules/
-build/
-dist/
-coverage/
-.DS_Store
-*.log
-.env*
-!.env.example
-.env.local
+.env
+.wwebjs_auth/
+.wwebjs_cache/
