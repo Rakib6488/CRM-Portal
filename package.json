@@ -6,8 +6,8 @@
     "dev": "concurrently -n auth,client -c cyan,magenta \"npm run dev:auth\" \"npm run dev:client\"",
     "dev:auth": "tsx server.ts",
     "dev:client": "vite --host 0.0.0.0 --configLoader runner",
-    "build": "vite build --configLoader runner",
-    "build:render": "puppeteer browsers install chrome && vite build --configLoader runner",
+    "build": "node scripts/install-chrome.mjs && vite build --configLoader runner",
+    "build:render": "node scripts/install-chrome.mjs && vite build --configLoader runner",
     "preview": "vite preview --host 0.0.0.0",
     "start": "tsx server.ts"
   },
