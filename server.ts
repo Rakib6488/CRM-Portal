@@ -2188,88 +2188,39 @@ async function startServer() {
   }
 
   function resolveChromeExecutable() {
-    const userProfile = process.env.USERPROFILE || process.env.HOME || __dirname;
-    const candidatePaths = [
-      process.env.CHROME_BIN,
-      process.env.PUPPETEER_EXECUTABLE_PATH,
-      process.env.GOOGLE_CHROME_BIN,
-      path.join(userProfile, ".cache", "puppeteer", "chrome", "chrome-win64", "chrome.exe"),
-      path.join(userProfile, ".cache", "puppeteer", "chrome", "win64-146.0.7680.31", "chrome-win64", "chrome.exe"),
-      path.join(userProfile, ".cache", "puppeteer", "chrome-linux64", "chrome"),
-      path.join(userProfile, ".cache", "puppeteer", "chrome-linux64", "linux-146.0.7680.31", "chrome-linux64", "chrome"),
-      path.join(userProfile, ".cache", "puppeteer", "chrome-headless-shell", "chrome-headless-shell-win64", "chrome-headless-shell.exe"),
-      path.join(userProfile, ".cache", "puppeteer", "chrome-headless-shell", "win64-146.0.7680.31", "chrome-headless-shell-win64", "chrome-headless-shell.exe"),
-      path.join(userProfile, ".cache", "puppeteer", "chrome-headless-shell", "chrome-headless-shell-linux64", "chrome"),
-      path.join(userProfile, ".cache", "puppeteer", "chrome-headless-shell", "linux-146.0.7680.31", "chrome-headless-shell-linux64", "chrome"),
-      path.join(process.env.ProgramFiles || "C:\\Program Files", "Google", "Chrome", "Application", "chrome.exe"),
-      path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Google", "Chrome", "Application", "chrome.exe"),
-      "/opt/render/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome",
-      "/opt/render/.cache/puppeteer/chrome-headless-shell/linux-146.0.7680.31/chrome-headless-shell-linux64/chrome",
-    ].filter(Boolean);
+    const envPath = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_BIN || process.env.GOOGLE_CHROME_BIN;
+    if (envPath && fs.existsSync(envPath)) {
+      return envPath;
+    }
 
-    for (const candidate of candidatePaths) {
-      if (candidate && fs.existsSync(candidate)) {
-        return candidate;
+    let puppeteerPath: string | null = null;
+    try {
+      // Use installed puppeteer binary if available.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-unsafe-assignment
+      const puppeteerModule = require("puppeteer");
+      if (typeof puppeteerModule?.executablePath === "function") {
+        puppeteerPath = puppeteerModule.executablePath();
+      }
+    } catch (error) {
+      console.warn("[Server] Could not resolve Puppeteer executable via require('puppeteer'):", error);
+    }
+
+    if (puppeteerPath && fs.existsSync(puppeteerPath)) {
+      return puppeteerPath;
+    }
+
+    if (process.platform === "linux") {
+      const renderCandidate = "/opt/render/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome";
+      if (fs.existsSync(renderCandidate)) {
+        return renderCandidate;
+      }
+      const renderHeadlessCandidate = "/opt/render/.cache/puppeteer/chrome-headless-shell/linux-146.0.7680.31/chrome-headless-shell-linux64/chrome";
+      if (fs.existsSync(renderHeadlessCandidate)) {
+        return renderHeadlessCandidate;
       }
     }
 
-    const puppeteerRoots = [
-      path.join(userProfile, ".cache", "puppeteer"),
-      process.env.PUPPETEER_CACHE_DIR,
-      "/opt/render/.cache/puppeteer",
-    ].filter((root): root is string => Boolean(root));
-
-    const zipPaths: string[] = [];
-    for (const root of puppeteerRoots) {
-      zipPaths.push(
-        path.join(root, "chrome", "146.0.7680.31-chrome-win64.zip"),
-        path.join(root, "chrome", "146.0.7680.31-chrome-linux64.zip"),
-        path.join(root, "chrome-headless-shell", "146.0.7680.31-chrome-win64.zip"),
-        path.join(root, "chrome-headless-shell", "146.0.7680.31-chrome-linux64.zip"),
-      );
-    }
-
-    for (const zipPath of zipPaths) {
-      if (fs.existsSync(zipPath)) {
-        try {
-          console.warn("Chrome executable missing; extracting the cached browser archive...");
-          const outputDir = path.dirname(zipPath);
-          execFileSync(
-            "powershell",
-            [
-              "-NoProfile",
-              "-Command",
-              `Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${outputDir}' -Force`,
-            ],
-            { stdio: "inherit" },
-          );
-        } catch (error) {
-          console.error("Could not extract Chrome archive:", error);
-        }
-        break;
-      }
-    }
-
-    const fallbackCandidates: string[] = [];
-    function walk(dir: string) {
-      if (!fs.existsSync(dir)) return;
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          walk(fullPath);
-        } else if (/chrome(?:-headless-shell)?(?:\.exe|)$/i.test(entry.name)) {
-          if (entry.name === "chrome" || entry.name === "chrome-headless-shell") {
-            fallbackCandidates.push(fullPath);
-          }
-        }
-      }
-    }
-    for (const root of puppeteerRoots) {
-      if (!root) continue;
-      walk(root);
-    }
-
-    return fallbackCandidates[0] || null;
+    return null;
   }
 
   function startWhatsAppClient() {
@@ -2280,13 +2231,18 @@ async function startServer() {
     const whatsappAuthDir = path.join(os.homedir(), ".customer-support-portal", ".wwebjs_auth");
     fs.mkdirSync(whatsappAuthDir, { recursive: true });
 
+    const puppeteerLaunchOptions: any = {
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    };
+
+    if (executablePath) {
+      puppeteerLaunchOptions.executablePath = executablePath;
+    }
+
     whatsappClient = new WhatsAppClient({
       authStrategy: new LocalAuth({ dataPath: whatsappAuthDir }),
-      puppeteer: {
-        headless: true,
-        executablePath: executablePath || undefined,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      },
+      puppeteer: puppeteerLaunchOptions,
     });
 
     whatsappClient.on("qr", async (qr) => {
