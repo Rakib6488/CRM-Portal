@@ -33,15 +33,18 @@ import {
 import { initializeApp as initAdminApp, getApps as getAdminApps, cert } from "firebase-admin/app";
 import { getFirestore as getAdminFirestore } from "firebase-admin/firestore";
 
-const envLocalPath = path.resolve(process.cwd(), '.env.local');
-const dotenvResult = fs.existsSync(envLocalPath)
-  ? dotenv.config({ path: envLocalPath })
-  : dotenv.config();
+const envLocalPath = path.resolve(process.cwd(), ".env.local");
+const envPath = fs.existsSync(envLocalPath)
+  ? envLocalPath
+  : path.resolve(process.cwd(), ".env");
+const dotenvResult = fs.existsSync(envPath)
+  ? dotenv.config({ path: envPath })
+  : undefined;
 
-if (dotenvResult.error) {
-  console.warn('[Server] dotenv failed to load .env.local or .env:', dotenvResult.error);
-} else if (dotenvResult.parsed) {
-  console.log('[Server] Loaded environment variables from', fs.existsSync(envLocalPath) ? '.env.local' : '.env');
+if (dotenvResult?.error) {
+  console.warn("[Server] dotenv failed to load environment file:", dotenvResult.error);
+} else if (dotenvResult?.parsed) {
+  console.log("[Server] Loaded environment variables from", path.basename(envPath));
 }
 
 // Server Secret for HMAC JWT Session Signing (Uses default dev key if process.env.SERVER_SECRET is undefined)
@@ -198,7 +201,7 @@ function handleFirestoreError(sdk: 'admin' | 'client', action: string, path: str
   }
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number = 2000): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number = 8000): Promise<T> {
   let timer: NodeJS.Timeout;
   const timeoutPromise = new Promise<T>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`Firestore operation timed out after ${ms}ms`)), ms);
@@ -257,7 +260,7 @@ async function dbGetDoc(collectionName: string, docId: string): Promise<any> {
   const cleanId = docId.toLowerCase();
   if (adminDb && adminDbAvailable) {
     try {
-      const snap: any = await withTimeout(adminDb.collection(collectionName).doc(cleanId).get(), 2000);
+      const snap: any = await withTimeout(adminDb.collection(collectionName).doc(cleanId).get(), 8000);
       if (snap.exists) {
         const data = snap.data();
         if (collectionName === 'agent_credentials') inMemoryCredentialsMap.set(cleanId, data as ServerAgentCredential);
@@ -270,7 +273,7 @@ async function dbGetDoc(collectionName: string, docId: string): Promise<any> {
   }
   if (clientDb && clientDbAvailable) {
     try {
-      const snap = await withTimeout(getDoc(doc(clientDb, collectionName, cleanId)), 2000);
+      const snap = await withTimeout(getDoc(doc(clientDb, collectionName, cleanId)), 8000);
       if (snap.exists()) {
         const data = snap.data();
         if (collectionName === 'agent_credentials') inMemoryCredentialsMap.set(cleanId, data as ServerAgentCredential);
@@ -294,7 +297,7 @@ async function dbSetDoc(collectionName: string, docId: string, data: any): Promi
   }
   if (adminDb && adminDbAvailable) {
     try {
-      await withTimeout(adminDb.collection(collectionName).doc(cleanId).set(data, { merge: true }), 2000);
+      await withTimeout(adminDb.collection(collectionName).doc(cleanId).set(data, { merge: true }), 8000);
       return true;
     } catch (e) {
       handleFirestoreError('admin', 'setDoc', `${collectionName}/${cleanId}`, e);
@@ -302,7 +305,7 @@ async function dbSetDoc(collectionName: string, docId: string, data: any): Promi
   }
   if (clientDb && clientDbAvailable) {
     try {
-      await withTimeout(setDoc(doc(clientDb, collectionName, cleanId), data, { merge: true }), 2000);
+      await withTimeout(setDoc(doc(clientDb, collectionName, cleanId), data, { merge: true }), 8000);
       return true;
     } catch (e) {
       handleFirestoreError('client', 'setDoc', `${collectionName}/${cleanId}`, e);
@@ -318,7 +321,7 @@ async function dbDeleteDoc(collectionName: string, docId: string): Promise<boole
   }
   if (adminDb && adminDbAvailable) {
     try {
-      await withTimeout(adminDb.collection(collectionName).doc(cleanId).delete(), 2000);
+      await withTimeout(adminDb.collection(collectionName).doc(cleanId).delete(), 8000);
       return true;
     } catch (e) {
       handleFirestoreError('admin', 'deleteDoc', `${collectionName}/${cleanId}`, e);
@@ -326,7 +329,7 @@ async function dbDeleteDoc(collectionName: string, docId: string): Promise<boole
   }
   if (clientDb && clientDbAvailable) {
     try {
-      await withTimeout(deleteDoc(doc(clientDb, collectionName, cleanId)), 2000);
+      await withTimeout(deleteDoc(doc(clientDb, collectionName, cleanId)), 8000);
       return true;
     } catch (e) {
       handleFirestoreError('client', 'deleteDoc', `${collectionName}/${cleanId}`, e);
@@ -338,7 +341,7 @@ async function dbDeleteDoc(collectionName: string, docId: string): Promise<boole
 async function dbGetCollectionDocs(collectionName: string): Promise<any[]> {
   if (adminDb && adminDbAvailable) {
     try {
-      const snap: any = await withTimeout(adminDb.collection(collectionName).get(), 2000);
+      const snap: any = await withTimeout(adminDb.collection(collectionName).get(), 8000);
       const docs = snap.docs.map((d: any) => d.data());
       if (collectionName === 'agent_credentials' && docs.length > 0) {
         docs.forEach((c: any) => inMemoryCredentialsMap.set(c.agentId.toLowerCase(), c as ServerAgentCredential));
@@ -350,7 +353,7 @@ async function dbGetCollectionDocs(collectionName: string): Promise<any[]> {
   }
   if (clientDb && clientDbAvailable) {
     try {
-      const snap = await withTimeout(getDocs(collection(clientDb, collectionName)), 2000);
+      const snap = await withTimeout(getDocs(collection(clientDb, collectionName)), 8000);
       const list: any[] = [];
       snap.forEach(d => {
         const data = d.data();
@@ -2162,7 +2165,14 @@ async function startServer() {
     });
 
     try {
-      await telegramClient.connect();
+      await Promise.race([
+        telegramClient.connect(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Telegram connection timed out after 15 seconds")), 15000)),
+      ]);
+      const authorized = await telegramClient.checkAuthorization();
+      if (!authorized) {
+        throw new Error("Telegram session is not authorized. Generate a new TELEGRAM_SESSION.");
+      }
       telegramReady = true;
       publishServerStatus();
       io?.emit("telegram-connected");
@@ -2319,13 +2329,19 @@ async function startServer() {
     whatsappClient.on("disconnected", (reason) => {
       whatsappReady = false;
       publishServerStatus();
-      console.warn("WhatsApp client disconnected:", reason);
+      const message = `WhatsApp disconnected: ${reason || "session ended"}. Request a new QR code.`;
+      console.warn(message);
+      io?.emit("whatsapp-connect-failed", message);
+      whatsappQrDataUrl = null;
     });
 
     whatsappClient.on("auth_failure", (message) => {
       whatsappReady = false;
       publishServerStatus();
-      console.error("WhatsApp auth failed:", message);
+      const status = `WhatsApp authentication failed: ${message || "QR expired or was rejected"}. Generate a new QR code.`;
+      console.error(status);
+      io?.emit("whatsapp-connect-failed", status);
+      whatsappQrDataUrl = null;
     });
 
     whatsappClient.on("message", async (message) => {
@@ -2349,7 +2365,9 @@ async function startServer() {
     });
 
     whatsappClient.initialize().catch((error) => {
-      console.error("WhatsApp startup failed:", error);
+      const message = `WhatsApp startup failed: ${error?.message || error}`;
+      console.error(message);
+      io?.emit("whatsapp-connect-failed", message);
     });
   }
 
