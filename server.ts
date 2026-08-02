@@ -2189,8 +2189,16 @@ async function startServer() {
 
   function resolveChromeExecutable() {
     const envPath = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_BIN || process.env.GOOGLE_CHROME_BIN;
-    if (envPath && fs.existsSync(envPath)) {
-      return envPath;
+    const isWindowsPath = (candidate: string) => /^[a-zA-Z]:[\\/]/.test(candidate);
+
+    if (envPath) {
+      if (process.platform === "linux" && isWindowsPath(envPath)) {
+        console.warn("[Server] Ignoring Windows browser path on Linux:", envPath);
+      } else if (fs.existsSync(envPath)) {
+        return envPath;
+      } else {
+        console.warn("[Server] Configured browser path does not exist:", envPath);
+      }
     }
 
     let puppeteerPath: string | null = null;
@@ -2239,6 +2247,7 @@ async function startServer() {
     if (executablePath) {
       puppeteerLaunchOptions.executablePath = executablePath;
     }
+    console.log("[Server] WhatsApp Puppeteer executablePath:", executablePath || "auto");
 
     whatsappClient = new WhatsAppClient({
       authStrategy: new LocalAuth({ dataPath: whatsappAuthDir }),

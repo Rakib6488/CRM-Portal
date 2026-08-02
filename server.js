@@ -280,21 +280,25 @@ async function startTelegramClient() {
 // risks the number getting rate-limited or banned. Use a number you're OK
 // taking that risk with.
 function resolveChromeExecutable() {
+  const envPath = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_BIN || process.env.GOOGLE_CHROME_BIN;
+  const isWindowsPath = (candidate) => /^[a-zA-Z]:[\\/]/.test(candidate);
+
+  if (envPath) {
+    if (process.platform === "linux" && isWindowsPath(envPath)) {
+      console.warn("[Server] Ignoring Windows browser path on Linux:", envPath);
+    } else if (fs.existsSync(envPath)) {
+      return envPath;
+    } else {
+      console.warn("[Server] Configured browser path does not exist:", envPath);
+    }
+  }
+
   const userProfile = process.env.USERPROFILE || process.env.HOME || __dirname;
   const candidatePaths = [
-    process.env.CHROME_BIN,
-    process.env.PUPPETEER_EXECUTABLE_PATH,
-    process.env.GOOGLE_CHROME_BIN,
-    path.join(userProfile, ".cache", "puppeteer", "chrome", "chrome-win64", "chrome.exe"),
-    path.join(userProfile, ".cache", "puppeteer", "chrome", "win64-146.0.7680.31", "chrome-win64", "chrome.exe"),
     path.join(userProfile, ".cache", "puppeteer", "chrome", "chrome-linux64", "chrome"),
     path.join(userProfile, ".cache", "puppeteer", "chrome", "linux-146.0.7680.31", "chrome-linux64", "chrome"),
-    path.join(userProfile, ".cache", "puppeteer", "chrome-headless-shell", "chrome-headless-shell-win64", "chrome-headless-shell.exe"),
-    path.join(userProfile, ".cache", "puppeteer", "chrome-headless-shell", "win64-146.0.7680.31", "chrome-headless-shell-win64", "chrome-headless-shell.exe"),
     path.join(userProfile, ".cache", "puppeteer", "chrome-headless-shell", "chrome-headless-shell-linux64", "chrome-headless-shell"),
     path.join(userProfile, ".cache", "puppeteer", "chrome-headless-shell", "linux-146.0.7680.31", "chrome-headless-shell-linux64", "chrome-headless-shell"),
-    path.join(process.env.ProgramFiles || "C:\\Program Files", "Google", "Chrome", "Application", "chrome.exe"),
-    path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Google", "Chrome", "Application", "chrome.exe"),
     "/opt/render/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome",
     "/opt/render/.cache/puppeteer/chrome-headless-shell/linux-146.0.7680.31/chrome-headless-shell-linux64/chrome-headless-shell",
   ].filter(Boolean);
