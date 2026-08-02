@@ -2164,13 +2164,13 @@ async function startServer() {
     telegramClient = new TelegramClient(new StringSession(sessionValue), apiId, apiHash, {
       connectionRetries: 5,
       useWSS: true,
-      timeout: 15,
+      timeout: 60,
     });
 
     try {
       await Promise.race([
         telegramClient.connect(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Telegram connection timed out after 15 seconds")), 15000)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Telegram connection timed out after 60 seconds")), 60000)),
       ]);
       const authorized = await telegramClient.checkAuthorization();
       if (!authorized) {
