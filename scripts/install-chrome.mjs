@@ -11,7 +11,7 @@ if (process.platform === "linux") {
   if (isWindowsPath(process.env.PUPPETEER_CACHE_DIR)) {
     delete process.env.PUPPETEER_CACHE_DIR;
   }
-  process.env.PUPPETEER_CACHE_DIR ||= "/opt/render/.cache/puppeteer";
+  process.env.PUPPETEER_CACHE_DIR ||= path.resolve(process.cwd(), ".cache", "puppeteer");
 }
 
 const command = path.resolve(process.cwd(), "node_modules", ".bin", process.platform === "win32" ? "puppeteer.cmd" : "puppeteer");

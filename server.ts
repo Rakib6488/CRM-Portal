@@ -101,6 +101,7 @@ const supportedChannels = {
 let telegramClient: TelegramClient | null = null;
 let telegramReady = false;
 let telegramConnectBlocked = false;
+let telegramRetryTimer: NodeJS.Timeout | null = null;
 let whatsappClient: WhatsAppClient | null = null;
 let whatsappReady = false;
 let whatsappQrDataUrl: string | null = null;
@@ -2162,6 +2163,8 @@ async function startServer() {
 
     telegramClient = new TelegramClient(new StringSession(sessionValue), apiId, apiHash, {
       connectionRetries: 5,
+      useWSS: true,
+      timeout: 15,
     });
 
     try {
@@ -2188,7 +2191,13 @@ async function startServer() {
         io?.emit("telegram-connect-failed", "Telegram session is already active elsewhere. Stop the other Telegram client or replace TELEGRAM_SESSION, then redeploy.");
       } else {
         console.error("Telegram connection failed:", error);
-        io?.emit("telegram-connect-failed", "Telegram connection failed. Check server logs and environment variables.");
+        io?.emit("telegram-connect-failed", `Telegram connection failed: ${errorMessage}`);
+        if (!telegramRetryTimer) {
+          telegramRetryTimer = setTimeout(() => {
+            telegramRetryTimer = null;
+            startTelegramClient().catch((retryError) => console.error("Telegram retry failed:", retryError));
+          }, 30000);
+        }
       }
       try {
         await telegramClient?.disconnect();
@@ -2223,55 +2232,55 @@ async function startServer() {
   }
 
   function resolveChromeExecutable() {
-    const envPath = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_BIN || process.env.GOOGLE_CHROME_BIN;
+    const configuredPath = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_BIN || process.env.GOOGLE_CHROME_BIN;
     const isWindowsPath = (candidate: string) => /^[a-zA-Z]:[\\/]/.test(candidate);
 
-    if (process.platform === "linux") {
-      if (envPath && isWindowsPath(envPath)) {
-        console.warn("[Server] Ignoring Windows browser path on Linux:", envPath);
-        delete process.env.PUPPETEER_EXECUTABLE_PATH;
-        delete process.env.CHROME_BIN;
-        delete process.env.GOOGLE_CHROME_BIN;
-      } else if (envPath && fs.existsSync(envPath)) {
-        console.log("[Server] Using configured Chromium executable:", envPath);
-        return envPath;
+    if (configuredPath && !(process.platform === "linux" && isWindowsPath(configuredPath))) {
+      const candidate = path.isAbsolute(configuredPath)
+        ? configuredPath
+        : path.resolve(process.cwd(), configuredPath);
+      if (fs.existsSync(candidate)) {
+        return candidate;
       }
-      const cachePath = process.env.PUPPETEER_CACHE_DIR;
-      if (cachePath && isWindowsPath(cachePath)) {
-        console.warn("[Server] Ignoring Windows Puppeteer cache path on Linux:", cachePath);
-        delete process.env.PUPPETEER_CACHE_DIR;
-      }
+      console.warn("[Server] Configured Chromium path does not exist:", candidate);
     }
 
-    if (envPath && process.platform !== "linux" && fs.existsSync(envPath)) {
-      return envPath;
-    } else if (envPath && process.platform !== "linux") {
-      console.warn("[Server] Configured browser path does not exist:", envPath);
-    }
-    let puppeteerPath: string | null = null;
     try {
-      // Use installed puppeteer binary if available.
-      // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-unsafe-assignment
       const puppeteerModule = require("puppeteer");
-      if (typeof puppeteerModule?.executablePath === "function") {
-        puppeteerPath = puppeteerModule.executablePath();
+      const puppeteerPath = typeof puppeteerModule?.executablePath === "function"
+        ? puppeteerModule.executablePath()
+        : null;
+      if (puppeteerPath && fs.existsSync(puppeteerPath)) {
+        return puppeteerPath;
       }
     } catch (error) {
-      console.warn("[Server] Could not resolve Puppeteer executable via require('puppeteer'):", error);
-    }
-
-    if (puppeteerPath && fs.existsSync(puppeteerPath)) {
-      return puppeteerPath;
+      console.warn("[Server] Could not resolve Puppeteer executable:", error);
     }
 
     if (process.platform === "linux") {
-      const renderCandidate = "/opt/render/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome";
-      if (fs.existsSync(renderCandidate)) {
-        return renderCandidate;
-      }
-      const renderHeadlessCandidate = "/opt/render/.cache/puppeteer/chrome-headless-shell/linux-146.0.7680.31/chrome-headless-shell-linux64/chrome";
-      if (fs.existsSync(renderHeadlessCandidate)) {
-        return renderHeadlessCandidate;
+      const roots = [
+        path.join(process.cwd(), ".cache", "puppeteer"),
+        process.env.PUPPETEER_CACHE_DIR,
+        "/opt/render/.cache/puppeteer",
+      ].filter((root): root is string => Boolean(root && fs.existsSync(root)));
+
+      const findBrowser = (root: string): string | null => {
+        for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+          const entryPath = path.join(root, entry.name);
+          if (entry.isFile() && (entry.name === "chrome" || entry.name === "chrome-headless-shell")) {
+            return entryPath;
+          }
+          if (entry.isDirectory()) {
+            const found = findBrowser(entryPath);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+
+      for (const root of roots) {
+        const found = findBrowser(root);
+        if (found) return found;
       }
     }
 
