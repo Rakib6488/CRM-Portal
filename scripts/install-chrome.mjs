@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import process from "node:process";
+import path from "node:path";
 
 const isWindowsPath = (value) => /^[a-zA-Z]:[\\/]/.test(value || "");
 
@@ -13,5 +14,5 @@ if (process.platform === "linux") {
   process.env.PUPPETEER_CACHE_DIR ||= "/opt/render/.cache/puppeteer";
 }
 
-const command = process.platform === "win32" ? "node_modules/.bin/puppeteer.cmd" : "node_modules/.bin/puppeteer";
+const command = path.resolve(process.cwd(), "node_modules", ".bin", process.platform === "win32" ? "puppeteer.cmd" : "puppeteer");
 execFileSync(command, ["browsers", "install", "chrome"], { stdio: "inherit", shell: process.platform === "win32" });

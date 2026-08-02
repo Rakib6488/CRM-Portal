@@ -2222,6 +2222,9 @@ async function startServer() {
         delete process.env.PUPPETEER_EXECUTABLE_PATH;
         delete process.env.CHROME_BIN;
         delete process.env.GOOGLE_CHROME_BIN;
+      } else if (envPath && fs.existsSync(envPath)) {
+        console.log("[Server] Using configured Chromium executable:", envPath);
+        return envPath;
       }
       const cachePath = process.env.PUPPETEER_CACHE_DIR;
       if (cachePath && isWindowsPath(cachePath)) {

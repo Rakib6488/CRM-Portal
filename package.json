@@ -9,7 +9,8 @@
     "build": "node scripts/install-chrome.mjs && vite build --configLoader runner",
     "build:render": "node scripts/install-chrome.mjs && vite build --configLoader runner",
     "preview": "vite preview --host 0.0.0.0",
-    "start": "tsx server.ts"
+    "start": "tsx server.ts",
+    "telegram:session": "tsx scripts/generate-telegram-session.ts"
   },
   "dependencies": {
     "tsx": "^4.20.3",
