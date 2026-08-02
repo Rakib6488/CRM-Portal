@@ -153,6 +153,7 @@ export default function LiveChatSection({ agentName }: LiveChatSectionProps) {
     });
 
     socket.on('whatsapp-connect-failed', (message: string) => {
+      setWhatsappQr(null);
       setWhatsappStatusMessage(message);
       setRequestingQr(false);
     });
