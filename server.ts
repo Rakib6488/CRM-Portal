@@ -97,6 +97,7 @@ const supportedChannels = {
 
 let telegramClient: TelegramClient | null = null;
 let telegramReady = false;
+let telegramConnectBlocked = false;
 let whatsappClient: WhatsAppClient | null = null;
 let whatsappReady = false;
 let whatsappQrDataUrl: string | null = null;
@@ -208,9 +209,12 @@ function withTimeout<T>(promise: Promise<T>, ms: number = 2000): Promise<T> {
 const inMemoryCredentialsMap = new Map<string, ServerAgentCredential>();
 
 function populateDefaultInMemoryCredentials() {
-  const adminCreds = createCredentialHash('AdminSecure2026!');
+  const adminUsername = (process.env.ADMIN_LOGIN_USERNAME || 'admin').trim().toLowerCase();
+  const adminPassword = process.env.ADMIN_LOGIN_PASSWORD || 'AdminSecure2026!';
+  const agentPassword = process.env.AGENT_LOGIN_PASSWORD || 'AgentPass2026!';
+  const adminCreds = createCredentialHash(adminPassword);
   const adminDoc: ServerAgentCredential = {
-    agentId: 'admin',
+    agentId: adminUsername,
     name: 'Administrator',
     passwordHash: adminCreds.passwordHash,
     salt: adminCreds.salt,
@@ -220,7 +224,7 @@ function populateDefaultInMemoryCredentials() {
     tokenVersion: 1,
     updatedAtISO: new Date().toISOString()
   };
-  inMemoryCredentialsMap.set('admin', adminDoc);
+  inMemoryCredentialsMap.set(adminUsername, adminDoc);
 
   const agentNames = [
     'Sarah Jenkins', 'Marcus Vance', 'Elena Rostova', 'David Chen',
@@ -230,7 +234,7 @@ function populateDefaultInMemoryCredentials() {
 
   agentNames.forEach((name, index) => {
     const padIndex = String(index + 1).padStart(2, '0');
-    const agentCreds = createCredentialHash('AgentPass2026!');
+    const agentCreds = createCredentialHash(agentPassword);
     const id = `agent${padIndex}`;
     inMemoryCredentialsMap.set(id, {
       agentId: id,
@@ -251,9 +255,6 @@ populateDefaultInMemoryCredentials();
 
 async function dbGetDoc(collectionName: string, docId: string): Promise<any> {
   const cleanId = docId.toLowerCase();
-  if (collectionName === 'agent_credentials' && inMemoryCredentialsMap.has(cleanId)) {
-    return inMemoryCredentialsMap.get(cleanId);
-  }
   if (adminDb && adminDbAvailable) {
     try {
       const snap: any = await withTimeout(adminDb.collection(collectionName).doc(cleanId).get(), 2000);
@@ -262,7 +263,7 @@ async function dbGetDoc(collectionName: string, docId: string): Promise<any> {
         if (collectionName === 'agent_credentials') inMemoryCredentialsMap.set(cleanId, data as ServerAgentCredential);
         return data;
       }
-      return null;
+      return collectionName === 'agent_credentials' ? inMemoryCredentialsMap.get(cleanId) || null : null;
     } catch (e) {
       handleFirestoreError('admin', 'getDoc', `${collectionName}/${cleanId}`, e);
     }
@@ -275,7 +276,7 @@ async function dbGetDoc(collectionName: string, docId: string): Promise<any> {
         if (collectionName === 'agent_credentials') inMemoryCredentialsMap.set(cleanId, data as ServerAgentCredential);
         return data;
       }
-      return null;
+      return collectionName === 'agent_credentials' ? inMemoryCredentialsMap.get(cleanId) || null : null;
     } catch (e) {
       handleFirestoreError('client', 'getDoc', `${collectionName}/${cleanId}`, e);
     }
@@ -1676,7 +1677,11 @@ async function startServer() {
       return;
     }
     try {
-      mongoClient = new MongoClient(MONGODB_URI);
+      mongoClient = new MongoClient(MONGODB_URI, {
+        serverSelectionTimeoutMS: 5000,
+        connectTimeoutMS: 5000,
+        socketTimeoutMS: 10000,
+      });
       await mongoClient.connect();
       mongoDb = mongoClient.db(MONGODB_DB_NAME);
       await mongoDb.collection("ivr_calls").createIndex({ callSid: 1 }, { unique: true });
@@ -2133,6 +2138,11 @@ async function startServer() {
   }
 
   async function startTelegramClient() {
+    if (telegramConnectBlocked) {
+      io?.emit("telegram-connect-failed", "Telegram is disabled for this instance because its session is already active elsewhere. Replace TELEGRAM_SESSION or stop the other Telegram process, then redeploy.");
+      return;
+    }
+
     if (!apiId || !apiHash) {
       console.warn("Telegram env is missing. Set TELEGRAM_API_ID and TELEGRAM_API_HASH to enable live chat.");
       io?.emit("telegram-connect-failed", "Telegram env missing. Set TELEGRAM_API_ID and TELEGRAM_API_HASH.");
@@ -2157,11 +2167,26 @@ async function startServer() {
       publishServerStatus();
       io?.emit("telegram-connected");
       console.log("Telegram client connected.");
-    } catch (error) {
+    } catch (error: any) {
       telegramReady = false;
+      const errorCode = error?.code;
+      const errorMessage = String(error?.errorMessage || error?.message || error);
+      const duplicatedAuthKey = errorCode === 406 || errorMessage.includes("AUTH_KEY_DUPLICATED");
+      if (duplicatedAuthKey) {
+        telegramConnectBlocked = true;
+        console.error("Telegram connection failed: AUTH_KEY_DUPLICATED. TELEGRAM_SESSION is active in another process or deployment. Stop the other client or generate a new session string.");
+        io?.emit("telegram-connect-failed", "Telegram session is already active elsewhere. Stop the other Telegram client or replace TELEGRAM_SESSION, then redeploy.");
+      } else {
+        console.error("Telegram connection failed:", error);
+        io?.emit("telegram-connect-failed", "Telegram connection failed. Check server logs and environment variables.");
+      }
+      try {
+        await telegramClient?.disconnect();
+      } catch {
+        // The connection may already be closed after an authentication failure.
+      }
+      telegramClient = null;
       publishServerStatus();
-      console.error("Telegram connection failed:", error);
-      io?.emit("telegram-connect-failed", "Telegram connection failed. Check server logs and environment variables.");
       return;
     }
 
@@ -2191,19 +2216,25 @@ async function startServer() {
     const envPath = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_BIN || process.env.GOOGLE_CHROME_BIN;
     const isWindowsPath = (candidate: string) => /^[a-zA-Z]:[\\/]/.test(candidate);
 
-    if (envPath) {
-      if (process.platform === "linux" && isWindowsPath(envPath)) {
+    if (process.platform === "linux") {
+      if (envPath && isWindowsPath(envPath)) {
         console.warn("[Server] Ignoring Windows browser path on Linux:", envPath);
         delete process.env.PUPPETEER_EXECUTABLE_PATH;
         delete process.env.CHROME_BIN;
         delete process.env.GOOGLE_CHROME_BIN;
-      } else if (fs.existsSync(envPath)) {
-        return envPath;
-      } else {
-        console.warn("[Server] Configured browser path does not exist:", envPath);
+      }
+      const cachePath = process.env.PUPPETEER_CACHE_DIR;
+      if (cachePath && isWindowsPath(cachePath)) {
+        console.warn("[Server] Ignoring Windows Puppeteer cache path on Linux:", cachePath);
+        delete process.env.PUPPETEER_CACHE_DIR;
       }
     }
 
+    if (envPath && process.platform !== "linux" && fs.existsSync(envPath)) {
+      return envPath;
+    } else if (envPath && process.platform !== "linux") {
+      console.warn("[Server] Configured browser path does not exist:", envPath);
+    }
     let puppeteerPath: string | null = null;
     try {
       // Use installed puppeteer binary if available.
@@ -2239,6 +2270,13 @@ async function startServer() {
       return;
     }
     const executablePath = resolveChromeExecutable();
+    if (!executablePath) {
+      const message = "WhatsApp is unavailable because no Chromium browser was found. Install Chromium during deployment or set PUPPETEER_EXECUTABLE_PATH to a valid Linux executable.";
+      console.warn(`[Server] ${message}`);
+      io?.emit("whatsapp-connect-failed", message);
+      return;
+    }
+
     const whatsappAuthDir = path.join(os.homedir(), ".customer-support-portal", ".wwebjs_auth");
     fs.mkdirSync(whatsappAuthDir, { recursive: true });
 
