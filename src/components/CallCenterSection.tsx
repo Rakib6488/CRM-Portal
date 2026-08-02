@@ -167,7 +167,7 @@ export default function CallCenterSection(props: CallCenterSectionProps) {
         ) : (
           <button
             onClick={connect}
-            disabled={ivrConfigured === null || currentDeviceStatus === 'connecting'}
+            disabled={ivrConfigured === null}
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-[#6A00D1] hover:bg-[#5800B0] text-white transition-colors disabled:opacity-50"
           >
             Connect

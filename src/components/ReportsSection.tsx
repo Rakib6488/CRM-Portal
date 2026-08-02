@@ -179,7 +179,7 @@ export default function ReportsSection({
     const nameMatch = agentNameInRecord?.toLowerCase().includes(targetName) || 
                       agentIdInRecord?.toLowerCase().includes(targetName);
                       
-    return idMatch || nameMatch;
+    return idMatch || Boolean(nameMatch);
   };
 
   // Data compilers for live metrics & previews

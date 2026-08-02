@@ -558,6 +558,12 @@ export default function AdminSection({
     setShowPushConfirm(false);
     setIsPushingToSheet(true);
 
+    if (!token || !connectedSpreadsheetId) {
+      setIsPushingToSheet(false);
+      alert("Google Spreadsheet connection is not active or OAuth token is missing. Please authorize via Google first.");
+      return;
+    }
+
     let rows: any[][] = [];
     let headers: string[] = [];
     let sheetName = `${repType.toUpperCase()}_AUDIT`.substring(0, 30);
