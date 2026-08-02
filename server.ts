@@ -2194,6 +2194,9 @@ async function startServer() {
     if (envPath) {
       if (process.platform === "linux" && isWindowsPath(envPath)) {
         console.warn("[Server] Ignoring Windows browser path on Linux:", envPath);
+        delete process.env.PUPPETEER_EXECUTABLE_PATH;
+        delete process.env.CHROME_BIN;
+        delete process.env.GOOGLE_CHROME_BIN;
       } else if (fs.existsSync(envPath)) {
         return envPath;
       } else {
